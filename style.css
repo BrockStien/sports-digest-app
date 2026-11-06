@@ -166,12 +166,30 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 /* ---------- how to watch ---------- */
-.watch { margin-top: 8px; font-size: 14px; }
-.watch summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: 13px; list-style: none; }
-.watch summary::-webkit-details-marker { display: none; }
-.watch[open] summary { color: var(--ink); }
-.watch ul { margin: 6px 0 4px; padding-left: 18px; }
-.watch li { margin: 4px 0; line-height: 1.35; }
+/* Info boxes under a game: Where to watch / Betting lines / Highlights */
+.panel { margin-top: 8px; font-size: 14px; background: var(--card); border: 1px solid var(--rule); border-radius: 10px; }
+.panel + .panel { margin-top: 6px; }
+.panel summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+.panel summary::-webkit-details-marker { display: none; }
+.panel summary::after { content: "›"; margin-left: 4px; color: var(--muted); font-size: 18px; line-height: 1; transition: transform .15s; }
+.panel[open] summary::after { transform: rotate(90deg); }
+.panel .ph { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.panel .pv { margin-left: auto; font-size: 13px; color: var(--muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.panel > :not(summary) { margin-left: 12px; margin-right: 12px; }
+.panel > :last-child:not(summary) { margin-bottom: 10px; }
+.panel.watch ul { margin-top: 2px; padding-left: 18px; }
+.panel.watch li { margin: 4px 0; line-height: 1.35; }
+.panel.lines .ph { color: var(--ticket); }
+.odds { width: calc(100% - 24px); border-collapse: collapse; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+.odds th { font-size: 11px; color: var(--muted); font-weight: 600; text-align: right; padding: 2px 4px; }
+.odds td { text-align: right; padding: 5px 4px; border-top: 1px solid var(--rule); white-space: nowrap; }
+.odds .tm { text-align: left; font-weight: 600; }
+.panel.hl .recap { display: block; color: var(--ink); text-decoration: none; font-weight: 600; line-height: 1.35; margin-bottom: 8px; }
+.vid { display: flex; gap: 10px; align-items: center; text-decoration: none; color: var(--ink); margin-bottom: 8px; }
+.vid .thumb { position: relative; flex: 0 0 96px; height: 54px; border-radius: 6px; overflow: hidden; background: var(--chip); display: flex; align-items: center; justify-content: center; }
+.vid .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.vid .play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.vid .vt { display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 1.3; }
 .pill.chatpill { color: var(--ink); background: none; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; }
 
 /* ---------- chat ---------- */

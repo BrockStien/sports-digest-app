@@ -145,6 +145,30 @@
     }
     return null;
   }
+  // Betting lines (ESPN's sportsbook partner): spread, total and moneyline.
+  function parseLines(comp) {
+    const o = (comp.odds || [])[0];
+    if (!o || (!o.details && o.overUnder == null)) return null;
+    const close = x => (x && (x.close || x.current || x.open)) || {};
+    const ps = o.pointSpread || {}, ml = o.moneyline || {}, tot = o.total || {};
+    return {
+      provider: (o.provider || {}).name || "",
+      details: o.details || "",
+      spread: { away: close(ps.away), home: close(ps.home) },
+      total: o.overUnder != null ? String(o.overUnder) : "",
+      over: close(tot.over).odds || "", under: close(tot.under).odds || "",
+      ml: { away: close(ml.away).odds || (o.awayTeamOdds || {}).moneyLine || "", home: close(ml.home).odds || (o.homeTeamOdds || {}).moneyLine || "" },
+    };
+  }
+  // Video highlights and the written recap for finished games.
+  function parseHighlights(comp) {
+    const vids = (comp.highlights || []).map(h => ({
+      title: h.headline || h.description || "Highlights", thumb: h.thumbnail || "",
+      url: ((h.links || {}).web || {}).href || "", secs: +h.duration || 0,
+    })).filter(v => v.url).slice(0, 3);
+    const hl = (comp.headlines || [])[0] || {};
+    return { vids, recap: hl.shortLinkText || hl.description || "" };
+  }
   function parseGame(e, lg) {
     const comp = (e.competitions || [{}])[0];
     const cs = comp.competitors || [];
@@ -163,6 +187,8 @@
       home: team(home), away: team(away),
       tv: [...new Set(bc)].join(", "),
       odds: state === "pre" ? ((comp.odds || [{}])[0] || {}).details || "" : "",
+      lines: state === "pre" ? parseLines(comp) : null,
+      highlights: state === "post" ? parseHighlights(comp) : null,
       venue: (comp.venue || {}).fullName || "",
       link: ((e.links || []).find(l => (l.rel || []).includes("summary")) || {}).href || "",
       tickets: state === "pre" ? tickets(comp) : null,
@@ -1001,11 +1027,39 @@
                  (out ? ` Out of market? Try ${out}. Local games may be blacked out there.` : " Check the team's website for other options.")];
     });
   }
+  // 📺 Where to watch: its own box, with the channel in view before you open it.
   function watchBox(g) {
     if (g.state === "post" || g.postponed) return "";
-    return `<details class="watch"><summary>📺 How to watch</summary><ul>${
+    return `<details class="panel watch"><summary><span class="ph">📺 Where to watch</span><span class="pv">${esc(g.tv || "TBA")}</span></summary><ul>${
       watchInfo(g).map(([n, how]) => `<li><strong>${esc(n)}</strong> · ${esc(how)}</li>`).join("")
     }</ul><div class="small muted">Streaming deals change, so double-check with the service.</div></details>`;
+  }
+
+  // 📈 Betting lines: separate box, summary up front, full spread / total / moneyline inside.
+  function linesBox(g) {
+    const L = g.lines;
+    if (!L) return "";
+    const sp = side => side.line ? `${side.line}${side.odds ? ` <span class="muted">(${esc(side.odds)})</span>` : ""}` : "–";
+    const summary = [L.details, L.total && `O/U ${L.total}`].filter(Boolean).join(" · ");
+    return `<details class="panel lines"><summary><span class="ph">📈 Betting lines</span><span class="pv">${esc(summary || "See lines")}</span></summary>
+      <table class="odds"><thead><tr><th></th><th>Spread</th><th>Total</th><th>Money</th></tr></thead><tbody>
+        <tr><td class="tm">${esc(g.away.abbr || g.away.name)}</td><td>${sp(L.spread.away)}</td><td>${L.total ? `o${esc(L.total)}${L.over ? ` <span class="muted">(${esc(L.over)})</span>` : ""}` : "–"}</td><td>${esc(L.ml.away || "–")}</td></tr>
+        <tr><td class="tm">${esc(g.home.abbr || g.home.name)}</td><td>${sp(L.spread.home)}</td><td>${L.total ? `u${esc(L.total)}${L.under ? ` <span class="muted">(${esc(L.under)})</span>` : ""}` : "–"}</td><td>${esc(L.ml.home || "–")}</td></tr>
+      </tbody></table>
+      <div class="small muted">${L.provider ? `Lines from ${esc(L.provider)} via ESPN. ` : ""}For info only, and they move. Must be 21+ where legal.</div></details>`;
+  }
+
+  // 🎬 Highlights and recap for finished games (open by default for your teams).
+  function highlightsBox(g, fav) {
+    const h = g.highlights;
+    if (!h || (!h.vids.length && !h.recap)) return "";
+    const mins = s => s ? ` · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` : "";
+    return `<details class="panel hl" ${fav ? "open" : ""}><summary><span class="ph">🎬 Highlights${h.recap ? " & recap" : ""}</span><span class="pv">${h.vids.length ? `${h.vids.length} video${h.vids.length > 1 ? "s" : ""}` : "Recap"}</span></summary>
+      ${h.recap ? `<a class="recap" href="${esc(g.link || "#")}" target="_blank" rel="noopener">📰 ${esc(h.recap)}</a>` : ""}
+      ${h.vids.map(v => `<a class="vid" href="${esc(v.url)}" target="_blank" rel="noopener">
+        ${v.thumb ? `<span class="thumb"><img src="${esc(v.thumb)}" alt="" loading="lazy"><span class="play">▶</span></span>` : `<span class="thumb play-only">▶</span>`}
+        <span class="vt">${esc(v.title)}<span class="small muted">${mins(v.secs)} · ESPN</span></span></a>`).join("")}
+    </details>`;
   }
 
   function actions(g, fav, s) {
@@ -1040,14 +1094,14 @@
     else if (live) status = `<div class="status live">● Live · ${esc(g.detail)}</div>`;
     else if (done) status = `<div class="status">${esc(g.detail || "Final")}</div>`;
     else status = `<div class="status" style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);font-weight:600">${g.tbd ? "Time TBD" : esc(timeIn(g.start, s.timezone))}</div>`;
-    const meta = [g.tv, g.odds && `Line: ${g.odds}`].filter(Boolean).join(" · ");
     return `<div class="row ${fav ? "fav" : ""}">
       ${fav ? '<div class="small star" aria-label="Your team">★ Your team</div>' : ""}
       ${teamLine(g.away, showScore, aWin)}
       ${teamLine(g.home, showScore, hWin)}
       ${status}
-      ${meta && !done ? `<div class="meta">${esc(meta)}</div>` : ""}
+      ${done ? highlightsBox(g, fav) : ""}
       ${actions(g, fav, s)}
+      ${!done && !g.postponed ? linesBox(g) : ""}
     </div>`;
   }
 
