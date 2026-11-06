@@ -2,7 +2,7 @@
 
 When you're done, you and your friends will have:
 
-- **An app on your phone's home screen.** Sign in with a code sent to your email and pick your leagues and teams. Then check:
+- **An app on your phone's home screen.** Sign in with your email and a password, and pick your leagues and teams. Then check:
   - **Games:** yesterday's scores, today's live games and tomorrow's schedule, with ticket, calendar and **How to watch** buttons.
   - **News:** stories about your teams.
   - **Chat:** private group chats with friends, with a thread for each game.
@@ -31,9 +31,9 @@ Plan on **about 45 minutes**, one time. Everything here is free.
    You should see "Success. No rows returned." This creates the settings table and the security rules that keep each person's data private.
    **Then the group chat:** click **New query** again, paste all of `chat-setup.sql`, and click **Run**. Same "Success" message. This step is optional; if you skip it, the app simply has no Chat tab.
 
-## Part 2: Let Supabase send the sign-in codes
+## Part 2: Let Supabase send account emails
 
-Supabase's built-in email only reaches you, the project owner. Point it at your Gmail so it can send codes to your friends too. Use the same app password as the daily email.
+Supabase's built-in email only reaches you, the project owner. Point it at your Gmail so it can send confirmation and password-reset emails to your friends too. Use the same app password as the daily email.
 
 5. Go to **Project Settings** (gear icon at the bottom left), then **Authentication**, then **SMTP Settings**, and turn on **Enable custom SMTP**:
    - **Sender email:** your Gmail address
@@ -44,20 +44,12 @@ Supabase's built-in email only reaches you, the project owner. Point it at your 
    - **Password:** your 16-character Gmail app password
    - Click **Save**.
 
-6. Make the emails show a 6-digit code. This is what makes sign-in work inside the home-screen app.
-   Go to **Authentication** (left sidebar), then **Emails** (or **Email Templates**). Edit **both** of these templates:
-   - **Confirm signup** (sent to new people)
-   - **Magic Link** (sent to returning people)
-
-   In each one, set **Subject** to `Your Sports Digest code` and replace the **Message body** with:
+6. (Optional) Make the welcome email friendlier. Go to **Authentication**, then **Emails**, open **Confirm signup**, and replace the **Message body** with:
 
    ```html
-   <h2>Your sign-in code</h2>
-   <p style="font-size:32px;font-weight:bold;letter-spacing:6px">{{ .Token }}</p>
-   <p>Type this code into the Sports Digest app. It expires in one hour.</p>
-   <p>If you didn't ask for this, you can ignore this email.</p>
+   <p>Welcome to Sports Digest! <a href="{{ .ConfirmationURL }}">Tap here to confirm your email</a>, then go back to the app and sign in.</p>
    ```
-   Click **Save** on each one.
+   Click **Save**. The **Reset password** email works as it is.
 
 ## Part 3: Publish the app (GitHub Pages)
 
@@ -108,7 +100,7 @@ Supabase's built-in email only reaches you, the project owner. Point it at your 
 ## Part 5: Try it
 
 14. On your phone, open your app address in **Safari** (iPhone) or **Chrome** (Android).
-15. Enter your email, then type the 6-digit code from your inbox (check spam the first time).
+15. Tap **Create an account**, enter your email and a password, then tap the link in the confirmation email (check spam the first time) and sign in.
 16. Pick your leagues and teams and tap **Start my daily email**.
 17. **Put it on your home screen:**
     - **iPhone:** tap the **Share** button, then **Add to Home Screen**, then **Add**.

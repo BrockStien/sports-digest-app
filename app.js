@@ -309,8 +309,7 @@
       </form>
       ${up ? `<button class="btn link" id="toSignin">Already have an account? Sign in</button>`
            : `<button class="btn link" id="toSignup">New here? Create an account</button>
-              <button class="btn link" id="forgot">Forgot password? (or first time setting one)</button>
-              <button class="btn link" id="useCode">Email me a sign-in code instead</button>`}
+              <button class="btn link" id="forgot">Forgot password? (or first time setting one)</button>`}
       ${installHint()}
     </div>`;
     const $ = id => document.getElementById(id);
@@ -321,7 +320,6 @@
     if (up) $("toSignin").onclick = () => { remember(); renderSignIn("", "signin"); };
     else {
       $("toSignup").onclick = () => { remember(); renderSignIn("", "signup"); };
-      $("useCode").onclick = () => { remember(); renderCodeRequest(); };
       $("forgot").onclick = async () => {
         if (!okEmail()) return;
         remember();
@@ -395,80 +393,6 @@
       state.recovering = false;
       toast("Password saved. Use it to sign in from now on.");
       loadAccount(user);
-    };
-  }
-
-  function renderCodeRequest(errorMsg = "") {
-    $app.className = "no-tabs";
-    $app.innerHTML = `<div class="signin">
-      <img class="brand" src="icons/icon-192.png" alt="">
-      <div class="kicker">${esc(APP_NAME)}</div>
-      <h1>Sign in with a code</h1>
-      <form id="emailForm" class="field" novalidate>
-        <label for="email">Email</label>
-        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com" value="${esc(state.pendingEmail)}" required>
-        <p class="error ${errorMsg ? "" : "hidden"}" id="err">${esc(errorMsg)}</p>
-        <button class="btn primary block" style="margin-top:12px" id="send">Email me a sign-in code</button>
-      </form>
-      <button class="btn link" id="back">Sign in with a password instead</button>
-    </div>`;
-    document.getElementById("back").onclick = () => renderSignIn();
-    const form = document.getElementById("emailForm");
-    form.onsubmit = async ev => {
-      ev.preventDefault();
-      const email = document.getElementById("email").value.trim();
-      const err = document.getElementById("err");
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { err.textContent = "Enter a valid email address."; err.classList.remove("hidden"); return; }
-      const btn = document.getElementById("send");
-      btn.disabled = true; btn.textContent = "Sending…";
-      const { error } = await sb.auth.signInWithOtp({
-        email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname },
-      });
-      if (error) {
-        btn.disabled = false; btn.textContent = "Email me a sign-in code";
-        err.textContent = friendly(error);
-        err.classList.remove("hidden");
-        return;
-      }
-      state.pendingEmail = email;
-      renderCode();
-    };
-  }
-
-  function renderCode(errorMsg = "") {
-    $app.className = "no-tabs";
-    $app.innerHTML = `<div class="signin">
-      <img class="brand" src="icons/icon-192.png" alt="">
-      <h1>Check your email</h1>
-      <p class="muted">We sent a code to <strong>${esc(state.pendingEmail)}</strong>. Type it below. (It may take a minute; check spam too.)</p>
-      <form id="codeForm" class="field" novalidate>
-        <label for="code">Sign-in code</label>
-        <input id="code" class="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" required>
-        <p class="error ${errorMsg ? "" : "hidden"}" id="err">${esc(errorMsg)}</p>
-        <button class="btn primary block" style="margin-top:12px" id="verify">Sign in</button>
-      </form>
-      <button class="btn link" id="back">Use a different email</button>
-      <p class="hint">Got a link instead of a code? Tap "Use a different email", then "Sign in with a password instead" and "Forgot password?" to set a password.</p>
-    </div>`;
-    const input = document.getElementById("code");
-    input.focus();
-    input.oninput = () => document.getElementById("err").classList.add("hidden");
-    document.getElementById("back").onclick = () => renderCodeRequest();
-    document.getElementById("codeForm").onsubmit = async ev => {
-      ev.preventDefault();
-      const token = input.value.replace(/\D/g, "");
-      const err = document.getElementById("err");
-      if (token.length < 6) { err.textContent = "Enter the code from the email."; err.classList.remove("hidden"); return; }
-      const btn = document.getElementById("verify");
-      btn.disabled = true; btn.textContent = "Checking…";
-      const { data, error } = await sb.auth.verifyOtp({ email: state.pendingEmail, token, type: "email" });
-      if (error || !data.session) {
-        btn.disabled = false; btn.textContent = "Sign in";
-        err.textContent = "That code didn't work. Check it, or go back and send a new one.";
-        err.classList.remove("hidden");
-        return;
-      }
-      await loadAccount(data.session.user);
     };
   }
 
