@@ -1709,7 +1709,7 @@
 
     view.querySelector("#save").onclick = save;
     view.querySelector("#setpw").onclick = () => renderSetPassword(state.user);
-    view.querySelector("#signout").onclick = async () => { await phoneOff(true); await sb.auth.signOut(); };
+    view.querySelector("#signout").onclick = async () => { await phoneOff(true); await sb.auth.signOut({ scope: "local" }); };   /* only this phone: the widget and other devices stay signed in */
     const rm = view.querySelector("#remove");
     if (rm) rm.onclick = removeMe;
   }
