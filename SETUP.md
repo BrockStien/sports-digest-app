@@ -133,7 +133,7 @@ When everything above works, you can add phone alerts: games starting, scores, b
 |---|---|
 | App says **"Almost there"** | `config.js` still has the placeholder text. Do step 11. |
 | No code email arrives | Check spam. Then check step 5: the SMTP password must be the Gmail **app password**. In Supabase, **Authentication → Logs** shows send errors. |
-| Code email has a link but no number | Step 6: both templates need `{{ .Token }}`. |
+| "Wrong email or password" | No password yet (or forgot it)? Tap **Forgot password?** on the sign-in screen and follow the email link. |
 | "That code didn't work" | Codes expire after an hour and only the newest one works. Tap **Use a different email** and send a fresh one. |
 | "Too many tries" | Supabase limits how many codes it sends per hour. Wait a few minutes. |
 | Team search finds nothing | ESPN didn't respond. Type the full team name, like `Minnesota Vikings`, and tap **Add**. |
