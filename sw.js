@@ -1,6 +1,6 @@
 // Lets the app open instantly, work as an installed app, and show notifications.
 // Bump VERSION whenever you change app files so phones pick up the update.
-const VERSION = "sd-v7";
+const VERSION = "sd-v8";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",
@@ -25,8 +25,9 @@ self.addEventListener("fetch", event => {
   if (req.method !== "GET" || url.origin !== self.location.origin) return;
 
   // Network first (so updates show up right away), falling back to the saved copy when offline.
+  // "no-cache" = always check GitHub for a newer copy (skips the browser's 10-minute cache).
   event.respondWith(
-    fetch(req)
+    fetch(req.url, { cache: "no-cache", credentials: "same-origin" })
       .then(res => {
         if (res.ok) {
           const copy = res.clone();
