@@ -15,8 +15,9 @@
   --tabbar: 64px;
   color-scheme: light;
 }
+/* Dark colors: follow the phone's setting unless the person picked Light or Dark in My Teams. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f0f11;
     --card: #1b1b1f;
     --ink: #f4f4f5;
@@ -31,6 +32,26 @@
     color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+    --bg: #0f0f11;
+    --card: #1b1b1f;
+    --ink: #f4f4f5;
+    --muted: #a1a1aa;
+    --rule: #2e2e33;
+    --accent: #ef3b56;
+    --fav: #2a2214;
+    --ticket: #4ade80;
+    --live: #ff5c73;
+    --chip: #26262b;
+    --shadow: none;
+    color-scheme: dark;
+}
+
+/* Appearance picker */
+.theme-pick { display: flex; gap: 6px; }
+.theme-pick button { flex: 1; border: 1px solid var(--rule); background: var(--card); border-radius: 10px; padding: 10px 6px; cursor: pointer; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.theme-pick button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; box-shadow: 0 0 0 1px var(--accent) inset; }
+.theme-pick .sw { width: 34px; height: 22px; border-radius: 6px; border: 1px solid var(--rule); }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }

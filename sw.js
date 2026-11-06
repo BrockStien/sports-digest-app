@@ -1,6 +1,6 @@
 // Lets the app open instantly, work as an installed app, and show notifications.
 // Bump VERSION whenever you change app files so phones pick up the update.
-const VERSION = "sd-v16";
+const VERSION = "sd-v17";
 const SHELL = [
   "./", "index.html", "style.css", "app.js", "config.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png",

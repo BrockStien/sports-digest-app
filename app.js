@@ -45,6 +45,7 @@
     timezone: TIMEZONES.some(t => t[0] === detectedTz) ? detectedTz : "America/Phoenix",
     headlines_per_league: 3, favorites_only_headlines: true, calendar_links: "all",
     calendar_attachment: true, reminder_minutes: 30, ticket_links: "favorites",
+    theme: "system",
   };
   const PUSH_ON = !!(CFG.VAPID_PUBLIC_KEY && CFG.VAPID_PUBLIC_KEY.length > 40);
   const NOTIFY_DEFAULTS = {
@@ -84,6 +85,15 @@
     sched: { view: "schedule", teams: {}, standings: {}, showAll: {}, full: {}, loading: false },
     chat: { ok: null, groups: null, groupId: null, thread: null, threadTitle: "", members: [], channel: null, poll: null, showSettings: false },
   };
+
+  // ---------------------------------------------------------------- theme
+  // "system" follows the phone's light/dark setting; "light"/"dark" override it.
+  // Remembered on this device (so it applies instantly) and in the account (so it follows you).
+  function applyTheme(t) {
+    t = t === "light" || t === "dark" ? t : "system";
+    if (t === "system") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+    try { localStorage.setItem("theme", t); } catch { /* private mode */ }
+  }
 
   // ---------------------------------------------------------------- helpers
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -359,6 +369,7 @@
     }
     state.sub = data;
     state.draft = { ...DEFAULTS, ...(data || {}) };
+    if (data && data.theme) applyTheme(data.theme);
     const joinCode = (location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/) || [])[1] || store.get("pendingJoin");
     const chatLink = location.hash.match(/^#chat\/([0-9a-f-]{36})(?:\/([a-z0-9]{2,8}:\d+|general))?$/);
     state.tab = data ? (location.hash === "#games" ? "today" : (store.get("tab") || "today")) : "teams";
@@ -1672,6 +1683,13 @@
 
       <div class="savebar"><button class="btn primary block" id="save">${first ? "Start my daily email" : "Save changes"}</button></div>
 
+      <h2>Appearance</h2>
+      <div class="theme-pick" role="group" aria-label="Appearance">
+        ${[["system", "System", "linear-gradient(135deg,#fff 50%,#1b1b1f 50%)"], ["light", "Light", "#fff"], ["dark", "Dark", "#1b1b1f"]].map(([k, label, bg]) =>
+          `<button type="button" data-theme-pick="${k}" aria-pressed="${(d.theme || "system") === k}"><span class="sw" style="background:${bg}"></span>${label}</button>`).join("")}
+      </div>
+      <p class="hint">System matches your phone's light or dark setting.</p>
+
       <h2>Account</h2>
       <p class="small muted">Signed in as ${esc(state.user.email)}</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -1711,6 +1729,16 @@
     fighter.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addFavorite(fighter.value); fighter.value = ""; } };
 
     view.querySelector("#save").onclick = save;
+    view.querySelectorAll("[data-theme-pick]").forEach(b => b.onclick = async () => {
+      const t = b.dataset.themePick;
+      d.theme = t; applyTheme(t);
+      view.querySelectorAll("[data-theme-pick]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+      // Saved right away (no need to tap Save) once the account has settings.
+      if (state.sub) {
+        const { error } = await sb.from("subscribers").update({ theme: t }).eq("id", state.user.id);
+        if (!error) state.sub.theme = t;
+      }
+    });
     view.querySelector("#setpw").onclick = () => renderSetPassword(state.user);
     view.querySelector("#signout").onclick = async () => { await phoneOff(true); await sb.auth.signOut({ scope: "local" }); };   /* only this phone: the widget and other devices stay signed in */
     const rm = view.querySelector("#remove");

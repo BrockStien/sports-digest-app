@@ -63,3 +63,8 @@ create policy "read own row"   on public.subscribers for select using (auth.uid(
 create policy "add own row"    on public.subscribers for insert with check (auth.uid() = id);
 create policy "change own row" on public.subscribers for update using (auth.uid() = id) with check (auth.uid() = id);
 create policy "delete own row" on public.subscribers for delete using (auth.uid() = id);
+
+-- Appearance (light / dark / follow the phone), chosen in My Teams.
+alter table public.subscribers add column if not exists theme text not null default 'system';
+alter table public.subscribers drop constraint if exists theme_valid;
+alter table public.subscribers add constraint theme_valid check (theme in ('system', 'light', 'dark'));
