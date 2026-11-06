@@ -514,6 +514,89 @@
     return `<div class="install">📱 Put it on your phone: ${how}.</div>`;
   }
 
+
+  // ------------------------------------------------- My Teams: "Set up on your phone"
+  const SCRIPTABLE_URL = "https://apps.apple.com/app/scriptable/id1405459188";
+  function phoneSetup() {
+    const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const android = /android/i.test(navigator.userAgent);
+    const step = (title, body) => `<li><b>${title}</b>${body ? `<span class="small muted">${body}</span>` : ""}</li>`;
+    return `
+      <h2>Set up on your phone</h2>
+      <details class="card howto" id="howHome" ${standalone ? "" : "open"}>
+        <summary><span class="ph">📱 Home Screen app</span><span class="pv">${standalone ? "✓ Done" : "2 minutes"}</span></summary>
+        ${standalone ? `<p class="notice good">You're using the Home Screen app. 👍</p>` : ""}
+        <div class="os ${ios || !android ? "" : "hidden"}"><div class="subhead">iPhone or iPad</div><ol>
+          ${step("Open this page in Safari.", "Other browsers on iPhone can't get game alerts.")}
+          ${step("Tap the Share button", "The square with an arrow, at the bottom (or top) of the screen. On newer iPhones it may be inside the ••• menu.")}
+          ${step("Scroll down and tap “Add to Home Screen”.", "")}
+          ${step("Make sure “Open as Web App” is on, then tap Add.", "")}
+          ${step("Open Sports Digest from your Home Screen icon and sign in.", "From now on, use the icon instead of Safari.")}
+          ${step("Turn on alerts.", "In My Teams → Notifications, tap the button to allow notifications on this phone. iPhones only allow alerts from the Home Screen app.")}
+        </ol></div>
+        <div class="os ${android || !ios ? "" : "hidden"}"><div class="subhead">Android</div><ol>
+          ${step("Open this page in Chrome.", "")}
+          ${step("Tap the ⋮ menu (top right).", "")}
+          ${step("Tap “Install app” or “Add to Home screen”, then Install.", "")}
+          ${step("Open Sports Digest from the new icon and turn on alerts in My Teams → Notifications.", "")}
+        </ol></div>
+        <div class="os ${ios || android ? "hidden" : ""}"><div class="subhead">Computer</div><ol>
+          ${step("In Chrome or Edge, click the install icon at the right end of the address bar.", "Or open the browser menu and choose “Install Sports Digest” / “Apps → Install this site as an app”.")}
+        </ol></div>
+        ${ios || android ? `<button type="button" class="btn link small" data-show-os>Show steps for other devices</button>` : ""}
+      </details>
+
+      <details class="card howto" id="howWidget" ${standalone && ios ? "open" : ""}>
+        <summary><span class="ph">🧩 Home Screen widget</span><span class="pv">iPhone &amp; iPad</span></summary>
+        <p class="small">Live scores and your next games right on your Home Screen or Lock Screen, using the free <b>Scriptable</b> app.${android ? " (There's no widget for Android yet; use the Home Screen app.)" : ""}</p>
+        <ol>
+          ${step(`Install <a href="${SCRIPTABLE_URL}" target="_blank" rel="noopener">Scriptable</a> from the App Store.`, "It's free.")}
+          <li><b>Copy the widget code.</b>
+            <button type="button" class="btn block copy-widget" id="copyWidget">📋 Copy widget code</button>
+            <span class="small muted">Or <a href="widget.js" target="_blank" rel="noopener">open the code</a> and copy it yourself.</span></li>
+          ${step("Open Scriptable, tap + (top right), and paste.", "Tap and hold in the empty editor, then tap Paste.")}
+          ${step("Tap the title at the top and rename it “Sports Digest”, then tap Done.", "")}
+          ${step("Tap the Sports Digest script once to run it, choose “Sign in”, and use the same email and password as this app.", "The widget then shows the favorite teams you pick here. Don't have a password yet? Tap “Set or change password” below.")}
+          ${step("Add the widget.", "Touch and hold an empty spot on your Home Screen → Edit (top left) → Add Widget → search Scriptable → pick Small, Medium or Large → Add Widget.")}
+          ${step("Point it at the script.", "Touch and hold the new widget → Edit Widget → Script: Sports Digest. Leave Parameter empty to use your My Teams favorites.")}
+        </ol>
+        <div class="subhead">Good to know</div>
+        <ul class="small">
+          <li><b>Lock Screen:</b> touch and hold the Lock Screen → Customize → Lock Screen → tap the widget area → Scriptable → then tap it to choose the Sports Digest script.</li>
+          <li><b>Refreshing:</b> iPhone decides when widgets update, usually every 15–30 minutes. Running the script in Scriptable updates it right away.</li>
+          <li><b>Tapping the widget</b> opens Sports Digest in Safari (iPhone doesn't let widgets open Home Screen apps).</li>
+          <li><b>Just certain teams?</b> Put them in the widget's Parameter box, e.g. <code>nfl:min, nhl:min</code>.</li>
+          <li><b>Says “Sign in”?</b> Open Scriptable, tap the script and sign in again.</li>
+        </ul>
+      </details>`;
+  }
+  async function copyWidget(btn) {
+    const done = ok => { btn.textContent = ok ? "✓ Copied — now open Scriptable" : "Couldn't copy. Use “open the code” below."; setTimeout(() => btn.textContent = "📋 Copy widget code", 4000); };
+    const fetchCode = () => fetch("widget.js", { cache: "no-cache" }).then(r => { if (!r.ok) throw new Error(r.status); return r.text(); });
+    try {
+      // Safari only allows copying during the tap, so hand it the download as a promise.
+      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+        await navigator.clipboard.write([new ClipboardItem({ "text/plain": fetchCode().then(t => new Blob([t], { type: "text/plain" })) })]);
+      } else {
+        await navigator.clipboard.writeText(await fetchCode());
+      }
+      done(true);
+    } catch {
+      try {
+        const t = document.createElement("textarea"); t.value = await fetchCode(); t.setAttribute("readonly", "");
+        t.style.position = "fixed"; t.style.opacity = "0"; document.body.appendChild(t); t.select();
+        const ok = document.execCommand("copy"); t.remove(); done(ok);
+      } catch { done(false); }
+    }
+  }
+  $app.addEventListener("click", e => {
+    const c = e.target.closest("#copyWidget");
+    if (c) { e.preventDefault(); copyWidget(c); return; }
+    const o = e.target.closest("[data-show-os]");
+    if (o) { e.preventDefault(); o.closest(".howto").querySelectorAll(".os").forEach(x => x.classList.remove("hidden")); o.remove(); }
+  });
+
   // -------------------------------------------------------------- app shell
   // "No favorites yet" prompt with a button that jumps to the team picker in My Teams.
   const addFavsBox = (msg = "You haven't picked any favorite teams yet.") =>
@@ -1924,6 +2007,8 @@
       </div>
       <p class="hint">System matches your phone's light or dark setting.</p>
 
+      ${phoneSetup()}
+
       <h2>Account</h2>
       <div id="adminSlot">${first ? "" : adminLink()}</div>
       <p class="small muted">Signed in as ${esc(state.user.email)}</p>
@@ -1931,8 +2016,7 @@
         <button class="btn" id="setpw">Set or change password</button>
         <button class="btn" id="signout">Sign out</button>
         ${first ? "" : `<button class="btn danger" id="remove">Delete my settings</button>`}
-      </div>
-      ${installHint()}`;
+      </div>`;
 
     // leagues
     view.querySelectorAll("[data-league]").forEach(cb => cb.onchange = () => {

@@ -344,3 +344,20 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .au-del p { margin: 8px 0; }
 .au-del input { width: 100%; margin-bottom: 8px; }
 .au-del .btn { height: 42px; }
+
+/* My Teams: Set up on your phone */
+.howto { padding: 0 14px; }
+.howto > summary { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 0; cursor: pointer; list-style: none; font-weight: 600; }
+.howto > summary::-webkit-details-marker { display: none; }
+.howto > summary .pv { font-weight: 400; font-size: 13px; color: var(--muted); }
+.howto[open] > summary { border-bottom: 1px solid var(--rule); margin-bottom: 4px; }
+.howto ol { padding-left: 22px; margin: 8px 0 12px; }
+.howto ol li { margin: 0 0 10px; }
+.howto ol li span { display: block; margin-top: 2px; }
+.howto ul { padding-left: 20px; margin: 6px 0 14px; }
+.howto ul li { margin-bottom: 6px; }
+.howto .subhead { margin-top: 12px; }
+.howto .copy-widget { margin: 8px 0 4px; height: 44px; }
+.howto code { background: var(--chip); border-radius: 4px; padding: 1px 4px; font-size: 12px; }
+.howto .notice.good { margin: 10px 0; }
+.howto [data-show-os] { margin: 0 0 12px; }
