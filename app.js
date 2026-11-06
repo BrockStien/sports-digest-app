@@ -1173,23 +1173,31 @@
   }
 
   // ---------------------------------------------------------------- my teams
+  // Team lists come through our Supabase "teams" function (ESPN doesn't let web pages load them directly).
   async function loadTeams(keys) {
-    await Promise.all(keys.filter(k => !state.teams[k] && LEAGUE[k] && LEAGUE[k].kind !== "fight").map(async k => {
-      const cacheKey = "teams:" + k;
-      const cached = store.get(cacheKey);
-      if (cached && Date.now() - cached.at < 7 * 864e5) { state.teams[k] = cached.list; return; }
-      try {
-        const lg = LEAGUE[k];
-        const data = await getJSON(`${ESPN}/${lg.path}/teams?` + qs(lg.teamParams || { limit: "100" }));
-        const list = (((data.sports || [])[0] || {}).leagues || [{}])[0].teams || [];
-        state.teams[k] = list.map(x => x.team || x).filter(t => t.displayName).map(t => ({
-          name: t.displayName, abbr: t.abbreviation || "", nick: t.name || "", league: k,
-          logo: (t.logos && t.logos[0] && t.logos[0].href) || "",
-        }));
-        store.set(cacheKey, { at: Date.now(), list: state.teams[k] });
-      } catch {
-        state.teamsFailed = true;
-      }
+    await Promise.all(keys.filter(k => !state.teams[k] && LEAGUE[k] && LEAGUE[k].kind !== "fight").map(k => {
+      state.teamLoads = state.teamLoads || {};
+      if (state.teamLoads[k]) return state.teamLoads[k];        // already loading: wait for that one
+      return (state.teamLoads[k] = (async () => {
+        const cacheKey = "teams2:" + k;
+        const cached = store.get(cacheKey);
+        if (cached && cached.list && cached.list.length && Date.now() - cached.at < 7 * 864e5) { state.teams[k] = cached.list; return; }
+        let list = [];
+        try {
+          const data = await getJSON(`${CFG.SUPABASE_URL.replace(/\/$/, "")}/functions/v1/teams?league=${encodeURIComponent(k)}`);
+          list = (data.teams || []).map(t => ({ name: t.name, abbr: t.abbr || "", nick: t.nick || "", league: k, logo: t.logo || "" }));
+        } catch { /* try ESPN directly below */ }
+        if (!list.length) {
+          try {
+            const lg = LEAGUE[k];
+            const data = await getJSON(`${ESPN}/${lg.path}/teams?` + qs(lg.teamParams || { limit: "100" }));
+            list = ((((data.sports || [])[0] || {}).leagues || [{}])[0].teams || []).map(x => x.team || x).filter(t => t.displayName)
+              .map(t => ({ name: t.displayName, abbr: t.abbreviation || "", nick: t.name || "", league: k, logo: (t.logos && t.logos[0] && t.logos[0].href) || "" }));
+          } catch { /* shown as "couldn't load" */ }
+        }
+        if (list.length) { state.teams[k] = list; store.set(cacheKey, { at: Date.now(), list }); }
+        else state.teamsFailed = true;
+      })().finally(() => { delete state.teamLoads[k]; }));
     }));
   }
 
@@ -1353,7 +1361,7 @@
     teamSel.innerHTML = list.length
       ? `<option value="">＋ Choose a team…</option>` + list.map(t =>
           `<option value="${esc(t.name)}" ${chosen.has(t.name.toLowerCase()) ? "disabled" : ""}>${esc(t.name)}${chosen.has(t.name.toLowerCase()) ? " ★" : ""}</option>`).join("")
-      : `<option>Couldn't load teams. Try again later.</option>`;
+      : `<option>Couldn't load teams. Close and reopen the app to try again.</option>`;
   }
 
   function clampInt(v, lo, hi, dflt) {
