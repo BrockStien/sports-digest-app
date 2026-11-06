@@ -231,3 +231,23 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .bout .pos { display: inline-block; min-width: 2.4em; color: var(--muted); font-variant-numeric: tabular-nums; }
 .bout.mine { font-weight: 600; }
 .sessions { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin-top: 6px; }
+
+/* Schedule & standings tab */
+.card-head .logo { width: 18px; height: 18px; vertical-align: -4px; }
+.sched-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.sched-main { flex: 1 1 180px; min-width: 0; }
+.sched-date { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
+.sched-opp { font-size: 15px; margin: 1px 0; }
+.sched-row .actions { margin-top: 0; }
+.sched-sum .win { color: var(--ticket); }
+.stand-group + .stand-group { border-top: 1px solid var(--rule); }
+.stand-name { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; padding: 10px 14px 2px; }
+.stand { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+.stand th { font-size: 11px; color: var(--muted); font-weight: 600; text-align: right; padding: 4px 8px; }
+.stand td { text-align: right; padding: 6px 8px; border-top: 1px solid var(--rule); white-space: nowrap; }
+.stand .tm { text-align: left; padding-left: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+.stand td:last-child, .stand th:last-child { padding-right: 14px; }
+.stand .rk { display: inline-block; width: 1.6em; color: var(--muted); font-size: 12px; }
+.stand .logo { width: 18px; height: 18px; vertical-align: -4px; margin-right: 6px; }
+.stand tr.mine td { background: var(--fav); font-weight: 600; }
+.card-head .btn.link.small { font-size: 12px; text-transform: none; letter-spacing: 0; padding: 0; }

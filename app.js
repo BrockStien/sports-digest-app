@@ -78,6 +78,7 @@
     news: null,        // {at, items, failed}
     loadingNews: false,
     newsMine: null,    // null = use the person's "only news about my teams" setting
+    sched: { view: "schedule", teams: {}, standings: {}, showAll: {}, full: {}, loading: false },
     chat: { ok: null, groups: null, groupId: null, thread: null, threadTitle: "", members: [], channel: null, poll: null, showSettings: false },
   };
 
@@ -99,6 +100,7 @@
     teams: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z"/></svg>',
     chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/></svg>',
     news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>',
+    sched: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>',
   };
 
@@ -130,7 +132,8 @@
       full: t.displayName || t.shortDisplayName || "?",
       abbr: t.abbreviation || "",
       logo: t.logo || (t.logos && t.logos[0] && t.logos[0].href) || "",
-      score: c.score, winner: !!c.winner,
+      score: c.score && typeof c.score === "object" ? (c.score.displayValue ?? c.score.value) : c.score, winner: !!c.winner,
+      id: String(t.id || ""),
       record: c.records && c.records[0] ? c.records[0].summary : "",
       rank: rank && rank <= 25 ? rank : null,
     };
@@ -149,7 +152,8 @@
     const away = cs.find(c => c.homeAway === "away") || cs[1] || {};
     const st = ((e.status || comp.status || {}).type) || {};
     const state = st.state || "pre";
-    const bc = [].concat(...(comp.broadcasts || []).map(b => b.names || []));
+    // Scoreboards list channel "names"; team schedules list "media.shortName".
+    const bc = [].concat(...(comp.broadcasts || []).map(b => b.names || (b.media && b.media.shortName ? [b.media.shortName] : [])));
     return {
       kind: "game", league: lg, id: e.id, key: `${lg}:${e.id}`, state,
       detail: st.shortDetail || st.detail || "",
@@ -467,13 +471,13 @@
   function renderApp() {
     $app.className = "";
     const first = !state.sub;
-    if (!["today", "news", "chat", "teams"].includes(state.tab) || (state.tab === "chat" && state.chat.ok === false)) state.tab = "today";
+    if (!["today", "sched", "news", "chat", "teams"].includes(state.tab) || (state.tab === "chat" && state.chat.ok === false)) state.tab = "today";
     const tab = (key, icon, label) =>
       `<button data-tab="${key}" ${state.tab === key ? 'aria-current="page"' : ""}>${icon}${label}</button>`;
     $app.innerHTML = `
       <div id="view"></div>
       ${first ? "" : `<nav class="tabs" aria-label="Main">
-        ${tab("today", ICON.today, "Games")}${tab("news", ICON.news, "News")}${state.chat.ok === false ? "" : tab("chat", ICON.chat, "Chat")}${tab("teams", ICON.teams, "My Teams")}
+        ${tab("today", ICON.today, "Games")}${tab("sched", ICON.sched, "Schedule")}${tab("news", ICON.news, "News")}${state.chat.ok === false ? "" : tab("chat", ICON.chat, "Chat")}${tab("teams", ICON.teams, "My Teams")}
       </nav>`}`;
     if (first) $app.className = "no-tabs";
     $app.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
@@ -484,6 +488,7 @@
     if (state.tab !== "chat") stopLive();
     if (first || state.tab === "teams") renderTeams();
     else if (state.tab === "news") renderNews();
+    else if (state.tab === "sched") renderSched();
     else if (state.tab === "chat") renderChat();
     else renderToday();
     paintChatBadge();
@@ -713,6 +718,229 @@
     if (state.news.failed) html += `<p class="small muted center" style="padding:8px 0">Couldn't reach ESPN for ${state.news.failed} league${state.news.failed > 1 ? "s" : ""}. Tap ↻ to try again.</p>`;
     box.innerHTML = html;
     box.querySelectorAll("[data-allnews]").forEach(b => b.onclick = () => { state.newsMine = false; renderNews(); });
+  }
+
+  // ------------------------------------------------------- schedule & standings
+  // Each favorite team's upcoming games (with tickets) and the standings it's in.
+  const STAND_COLS = {
+    nfl: [["W-L", "rec"], ["PCT", "winpercent"], ["DIV", "divisionrecord"], ["STRK", "streak"]],
+    nba: [["W-L", "rec"], ["PCT", "winpercent"], ["GB", "gamesbehind"], ["STRK", "streak"]],
+    nhl: [["W-L-OT", "rec"], ["PTS", "points"], ["STRK", "streak"]],
+    mlb: [["W-L", "rec"], ["PCT", "winpercent"], ["GB", "gamesbehind"], ["STRK", "streak"]],
+    cfb: [["Conf", "vsconf"], ["Overall", "rec"], ["STRK", "streak"]],
+    cbb: [["Conf", "vsconf"], ["Overall", "rec"], ["STRK", "streak"]],
+    f1: [["PTS", "points"]],
+    nascar: [["PTS", "points"]],
+  };
+  const STAND_URLS = {
+    nfl: ["?level=3"], nba: ["?level=3"], nhl: ["?level=3"], mlb: ["?level=3"],
+    cfb: ["?group=80", "?group=81"], cbb: ["?group=50"], f1: [""], nascar: [""],
+  };
+  const pctOf = rec => { const m = String(rec || "").match(/^(\d+)-(\d+)/); return m ? (+m[1] / Math.max(1, +m[1] + +m[2])) : 0; };
+
+  // Favorites -> [{league, id, name, logo}] for team sports (uses the same team lists as My Teams).
+  async function myTeamList() {
+    const s = state.sub;
+    const leagues = s.leagues.filter(k => LEAGUE[k] && !isPeople(k));
+    await loadTeams(leagues);
+    const favs = favSet();
+    const out = [];
+    for (const k of leagues) for (const t of state.teams[k] || []) {
+      if (!t.id) continue;
+      if ([t.name, t.nick, t.short, t.abbr].some(n => n && favs.has(n.toLowerCase())) && !out.some(o => o.league === k && o.id === t.id))
+        out.push({ league: k, id: t.id, name: t.name, logo: t.logo, conf: t.conf || "" });
+    }
+    return out;
+  }
+
+  async function loadSchedules() {
+    const sc = state.sched;
+    if (sc.loading) return;
+    sc.loading = true; paintSchedRefresh();
+    try {
+      sc.mine = await myTeamList();
+      await Promise.all(sc.mine.map(async t => {
+        const key = `${t.league}:${t.id}`;
+        try {
+          const data = await getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`);
+          const games = (data.events || []).map(e => parseGame(e, t.league)).filter(g => g.start).sort((a, b) => a.start - b.start);
+          const rec = ((data.team || {}).recordSummary) || "";
+          const standing = ((data.team || {}).standingSummary) || "";
+          sc.teams[key] = { at: Date.now(), games, rec, standing };
+        } catch { sc.teams[key] = { at: Date.now(), games: [], failed: true }; }
+      }));
+    } finally { sc.loading = false; }
+    sc.at = Date.now();
+    if (state.tab === "sched") paintSched(); else paintSchedRefresh();
+  }
+
+  async function loadStandings() {
+    const sc = state.sched;
+    const leagues = state.sub.leagues.filter(k => STAND_URLS[k]);
+    sc.loading = true; paintSchedRefresh();
+    await Promise.all(leagues.map(async k => {
+      const groups = [];
+      try {
+        for (const q of STAND_URLS[k]) {
+          const data = await getJSON(`https://site.api.espn.com/apis/v2/sports/${LEAGUE[k].path}/standings${q}`);
+          const isRace = LEAGUE[k].kind === "race";
+          const walk = (node, parent) => {
+            const entries = (node.standings || {}).entries || [];
+            if (entries.length) {
+              let name = String(node.shortName || node.name || "");
+              if (k === "mlb") name = name.replace("American League", "AL").replace("National League", "NL");
+              if ((k === "nba" || k === "nhl") && parent) name = `${String(parent.name || "").replace(/ern Conference$/, "").replace(/ Conference$/, "")} · ${String(node.name || "").replace(/ Division$/, "")}`;
+              if (k === "cfb" && q === "?group=81") name = "FCS · " + name.replace(/^FCS /, "");
+              if (isRace && /constructor/i.test(node.name || "")) return;    // drivers only
+              groups.push({ name: isRace ? "Driver standings" : name, rows: entries.map(e => {
+                const st = {};
+                for (const x of e.stats || []) if (x.type && st[x.type] == null) st[x.type] = { v: x.value, d: x.displayValue ?? x.summary ?? "" };
+                const who = e.team || e.athlete || {};
+                const rec = st.total ? String(st.total.d).split(",")[0] : st.overall && st.overall.d ? String(st.overall.d).split(",")[0]
+                  : st.wins ? `${st.wins.d}-${(st.losses || { d: 0 }).d}` + (st.otlosses ? `-${st.otlosses.d}` : "") : "";
+                return { id: String(who.id || ""), name: who.displayName || who.name || "?", short: who.shortDisplayName || who.displayName || "?",
+                         abbr: who.abbreviation || "", logo: (who.logos && who.logos[0] && who.logos[0].href) || (who.flag && who.flag.href) || "",
+                         st, rec, rank: st.rank ? +st.rank.v : null };
+              }) });
+            }
+            for (const c of node.children || []) walk(c, node);
+          };
+          walk(data, null);
+        }
+        for (const g of groups) g.rows.sort((a, b) => {
+          if (k === "nhl") return ((b.st.points || {}).v || 0) - ((a.st.points || {}).v || 0);
+          if (k === "cfb" || k === "cbb") return (pctOf((b.st.vsconf || {}).d) - pctOf((a.st.vsconf || {}).d)) || (pctOf(b.rec) - pctOf(a.rec));
+          if (LEAGUE[k].kind === "race") return (a.rank || 999) - (b.rank || 999);
+          return ((b.st.winpercent || {}).v ?? pctOf(b.rec)) - ((a.st.winpercent || {}).v ?? pctOf(a.rec));
+        });
+        sc.standings[k] = { at: Date.now(), groups };
+      } catch { sc.standings[k] = { at: Date.now(), groups: [], failed: true }; }
+    }));
+    sc.loading = false;
+    if (state.tab === "sched") paintSched(); else paintSchedRefresh();
+  }
+
+  function paintSchedRefresh() {
+    const r = document.getElementById("refresh");
+    if (r && state.tab === "sched") r.classList.toggle("spin", !!state.sched.loading);
+  }
+
+  function renderSched() {
+    const sc = state.sched;
+    if (!sc.inited) { sc.view = store.get("schedView") === "standings" ? "standings" : "schedule"; sc.inited = true; }
+    document.getElementById("view").innerHTML = `
+      <header class="top">
+        <div><div class="kicker">My teams</div><h1>${sc.view === "standings" ? "Standings" : "Schedule"}</h1></div>
+        <button class="icon-btn" id="refresh" aria-label="Refresh">${ICON.refresh}</button>
+      </header>
+      <div class="seg wide" role="group" aria-label="Schedule or standings">
+        <button data-sv="schedule" aria-pressed="${sc.view === "schedule"}">Upcoming games</button>
+        <button data-sv="standings" aria-pressed="${sc.view === "standings"}">Standings</button>
+      </div>
+      <div id="sched"><div class="empty">Loading…</div></div>`;
+    document.querySelectorAll("[data-sv]").forEach(b => b.onclick = () => { sc.view = b.dataset.sv; store.set("schedView", sc.view); renderSched(); });
+    document.getElementById("refresh").onclick = () => sc.view === "standings" ? loadStandings() : loadSchedules();
+    const stale = at => !at || Date.now() - at > 10 * 60e3;
+    if (sc.view === "standings") {
+      paintSched();
+      if (state.sub.leagues.some(k => STAND_URLS[k] && stale((sc.standings[k] || {}).at))) loadStandings();
+      if (!sc.mine) myTeamList().then(m => { sc.mine = m; if (state.tab === "sched") paintSched(); });
+    } else {
+      paintSched();
+      if (stale(sc.at)) loadSchedules();
+    }
+  }
+
+  function paintSched() {
+    const box = document.getElementById("sched");
+    if (!box) return;
+    paintSchedRefresh();
+    const sc = state.sched, s = state.sub;
+    if (sc.view === "standings") return paintStandings(box);
+    if (!sc.mine) { box.innerHTML = `<div class="empty">Loading your teams…</div>`; return; }
+    if (!sc.mine.length) {
+      box.innerHTML = `<div class="empty">Add favorite teams in <strong>My Teams</strong> to see their schedules and tickets here.<br>
+        <span class="small">Golf, racing and UFC events show on the Games tab.</span></div>`;
+      return;
+    }
+    const day = d => new Intl.DateTimeFormat("en-US", { timeZone: s.timezone, weekday: "short", month: "short", day: "numeric" }).format(d);
+    box.innerHTML = sc.mine.map(t => {
+      const key = `${t.league}:${t.id}`;
+      const info = sc.teams[key];
+      const head = `<div class="card-head"><span>${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy"> ` : ""}${esc(t.name)}</span>
+        <span>${esc(LEAGUE[t.league].name)}</span></div>`;
+      if (!info) return `<section class="card">${head}<div class="row muted">Loading…</div></section>`;
+      if (info.failed) return `<section class="card">${head}<div class="row muted">Couldn't load this schedule. Tap ↻ to try again.</div></section>`;
+      const upcoming = info.games.filter(g => g.state !== "post" && !g.postponed);
+      const last = info.games.filter(g => g.state === "post").slice(-1)[0];
+      const n = sc.full[key] ? upcoming.length : 5;
+      const opp = g => {
+        const home = g.home.id === t.id;
+        const o = home ? g.away : g.home;
+        return `${home ? "vs" : "@"} ${o.rank ? "#" + o.rank + " " : ""}${o.name}`;
+      };
+      const lastLine = last ? (() => {
+        const mine = last.home.id === t.id ? last.home : last.away, o = mine === last.home ? last.away : last.home;
+        const wl = mine.winner ? "W" : o.winner ? "L" : (+mine.score > +o.score ? "W" : +mine.score < +o.score ? "L" : "T");
+        return `<div class="sched-last small muted">Last game: <strong class="${wl === "W" ? "win" : ""}">${wl} ${esc(mine.score)}–${esc(o.score)}</strong> ${esc(opp(last))} · ${esc(day(last.start))}</div>`;
+      })() : "";
+      const summary = [info.rec && `Record ${info.rec}`, info.standing].filter(Boolean).join(" · ");
+      const rows = upcoming.slice(0, n).map(g => {
+        const tk = ticketLink(g, true, { ...s, ticket_links: s.ticket_links === "none" ? "favorites" : s.ticket_links });
+        const cal = calendarLink(g, true, { ...s, calendar_links: s.calendar_links === "none" ? "favorites" : s.calendar_links });
+        const time = g.state === "in" ? `<span class="live">● Live</span>` : g.tbd ? "Time TBD" : esc(timeIn(g.start, s.timezone));
+        return `<div class="row sched-row">
+          <div class="sched-main">
+            <div class="sched-date">${esc(day(g.start))}</div>
+            <div class="sched-opp"><strong>${esc(opp(g))}</strong></div>
+            <div class="small muted">${time}${g.tv ? " · " + esc(g.tv) : ""}${g.venue ? " · " + esc(g.venue) : ""}</div>
+          </div>
+          <div class="actions">
+            ${tk ? `<a class="pill ticket" href="${esc(tk.url)}" target="_blank" rel="noopener">🎟 ${esc(tk.label)}</a>` : ""}
+            ${cal ? `<a class="pill cal" href="${esc(cal)}" target="_blank" rel="noopener">+ Calendar</a>` : ""}
+          </div>
+        </div>`;
+      }).join("");
+      return `<section class="card">${head}
+        ${summary || lastLine ? `<div class="row sched-sum">${summary ? `<div class="small">${esc(summary)}</div>` : ""}${lastLine}</div>` : ""}
+        ${rows || `<div class="row muted">No upcoming games scheduled right now.</div>`}
+        ${upcoming.length > 5 ? `<div class="more"><button class="btn link" data-full="${esc(key)}">${sc.full[key] ? "Show fewer" : `Show all ${upcoming.length} upcoming games`}</button></div>` : ""}
+      </section>`;
+    }).join("") + `<p class="small muted center" style="padding:6px 0 14px">Ticket prices are from ESPN's ticket partner and change often. Golf, racing and UFC events are on the Games tab.</p>`;
+    box.querySelectorAll("[data-full]").forEach(b => b.onclick = () => { sc.full[b.dataset.full] = !sc.full[b.dataset.full]; paintSched(); });
+  }
+
+  function paintStandings(box) {
+    const sc = state.sched, s = state.sub;
+    const favs = favSet();
+    const mineIds = new Set((sc.mine || []).map(t => `${t.league}:${t.id}`));
+    const isMine = (k, r) => mineIds.has(`${k}:${r.id}`) || [r.name, r.short, r.abbr, r.name.split(" ").pop()].some(n => n && favs.has(n.toLowerCase()));
+    const leagues = s.leagues.filter(k => STAND_URLS[k]);
+    if (!leagues.length) { box.innerHTML = `<div class="empty">Standings aren't available for your leagues.</div>`; return; }
+    box.innerHTML = leagues.map(k => {
+      const data = sc.standings[k];
+      const head = `<div class="card-head"><span>${esc(LEAGUE[k].name)}</span>${data && data.groups.length ? `<button class="btn link small" data-sall="${k}">${sc.showAll[k] ? "Just my teams" : "Whole league"}</button>` : ""}</div>`;
+      if (!data) return `<section class="card">${head}<div class="row muted">Loading…</div></section>`;
+      if (data.failed || !data.groups.length) return `<section class="card">${head}<div class="row muted">No standings right now (it may be the off-season).</div></section>`;
+      const race = LEAGUE[k].kind === "race";
+      let groups = data.groups;
+      if (!sc.showAll[k]) {
+        const withMine = groups.filter(g => g.rows.some(r => isMine(k, r)));
+        groups = withMine.length ? withMine : race ? groups : [];
+      }
+      if (!groups.length) return `<section class="card">${head}<div class="row muted">None of your teams are in these standings. Tap <strong>Whole league</strong> to see them all.</div></section>`;
+      const cols = STAND_COLS[k];
+      return `<section class="card">${head}${groups.map(g => {
+        let rows = g.rows;
+        if (race && !sc.showAll[k]) rows = rows.filter((r, i) => i < 10 || isMine(k, r));   // top 10 plus your drivers
+        return `<div class="stand-group">${groups.length > 1 || !race ? `<div class="stand-name">${esc(g.name)}</div>` : ""}
+          <table class="stand"><thead><tr><th class="tm">${race ? "Driver" : "Team"}</th>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map((r, i) => `<tr class="${isMine(k, r) ? "mine" : ""}">
+            <td class="tm"><span class="rk">${race ? (r.rank || i + 1) : i + 1}</span>${r.logo && !race ? `<img class="logo" src="${esc(r.logo)}" alt="" loading="lazy">` : ""}${isMine(k, r) ? '<span class="star">★</span> ' : ""}${esc(race ? r.name : r.short)}</td>
+            ${cols.map(c => `<td>${esc(c[1] === "rec" ? r.rec : ((r.st[c[1]] || {}).d ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+      }).join("")}</section>`;
+    }).join("");
+    box.querySelectorAll("[data-sall]").forEach(b => b.onclick = () => { sc.showAll[b.dataset.sall] = !sc.showAll[b.dataset.sall]; paintSched(); });
   }
 
   // ------------------------------------------------------------- how to watch
@@ -1279,7 +1507,7 @@
       state.teamLoads = state.teamLoads || {};
       if (state.teamLoads[k]) return state.teamLoads[k];        // already loading: wait for that one
       return (state.teamLoads[k] = (async () => {
-        const cacheKey = "teams3:" + k;
+        const cacheKey = "teams4:" + k;
         const cached = store.get(cacheKey);
         if (cached && cached.list && cached.list.length && Date.now() - cached.at < (isPeople(k) ? 864e5 : 7 * 864e5)) { state.teams[k] = cached.list; state.confs[k] = cached.confs || []; return; }
         let confs = [];
@@ -1287,7 +1515,7 @@
         try {
           const data = await getJSON(`${CFG.SUPABASE_URL.replace(/\/$/, "")}/functions/v1/teams?league=${encodeURIComponent(k)}`);
           const tidy = c => String(c || "").replace(/^FCS · FCS /, "FCS ");
-          list = (data.teams || []).map(t => ({ name: t.name, abbr: t.abbr || "", nick: t.nick || "", short: t.short || "", league: k, logo: t.logo || "", conf: tidy(t.conf) }));
+          list = (data.teams || []).map(t => ({ id: String(t.id || ""), name: t.name, abbr: t.abbr || "", nick: t.nick || "", short: t.short || "", league: k, logo: t.logo || "", conf: tidy(t.conf) }));
           confs = (data.conferences || []).map(tidy);
         } catch { /* try ESPN directly below */ }
         if (!list.length && !isPeople(k)) {
@@ -1295,7 +1523,7 @@
             const lg = LEAGUE[k];
             const data = await getJSON(`${ESPN}/${lg.path}/teams?` + qs(lg.teamParams || { limit: "100" }));
             list = ((((data.sports || [])[0] || {}).leagues || [{}])[0].teams || []).map(x => x.team || x).filter(t => t.displayName)
-              .map(t => ({ name: t.displayName, abbr: t.abbreviation || "", nick: t.name || "", league: k, logo: (t.logos && t.logos[0] && t.logos[0].href) || "" }));
+              .map(t => ({ id: String(t.id || ""), name: t.displayName, abbr: t.abbreviation || "", nick: t.name || "", league: k, logo: (t.logos && t.logos[0] && t.logos[0].href) || "" }));
           } catch { /* shown as "couldn't load" */ }
         }
         if (list.length) { state.teams[k] = list; state.confs[k] = confs; store.set(cacheKey, { at: Date.now(), list, confs }); }
