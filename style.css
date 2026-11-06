@@ -223,3 +223,6 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .picker .btn { flex: 0 0 auto; }
 .picker + .picker { margin-top: 8px; }
 .picker.hidden, select.hidden { display: none; }
+.search-wrap { margin-top: 4px; }
+.or { text-align: center; margin: 10px 0 2px; }
+.results .lg { text-align: right; }

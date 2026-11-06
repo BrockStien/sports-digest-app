@@ -62,6 +62,7 @@
     pendingEmail: "",
     teams: {},         // league key -> [{name, abbr, logo, league}]
     teamsFailed: false,
+    confs: {},          // college conferences per league
     myTeamsOnly: true,
     showAllCollege: false,
     day: 0,            // -1 yesterday, 0 today, 1 tomorrow
@@ -1179,13 +1180,16 @@
       state.teamLoads = state.teamLoads || {};
       if (state.teamLoads[k]) return state.teamLoads[k];        // already loading: wait for that one
       return (state.teamLoads[k] = (async () => {
-        const cacheKey = "teams2:" + k;
+        const cacheKey = "teams3:" + k;
         const cached = store.get(cacheKey);
-        if (cached && cached.list && cached.list.length && Date.now() - cached.at < 7 * 864e5) { state.teams[k] = cached.list; return; }
+        if (cached && cached.list && cached.list.length && Date.now() - cached.at < 7 * 864e5) { state.teams[k] = cached.list; state.confs[k] = cached.confs || []; return; }
+        let confs = [];
         let list = [];
         try {
           const data = await getJSON(`${CFG.SUPABASE_URL.replace(/\/$/, "")}/functions/v1/teams?league=${encodeURIComponent(k)}`);
-          list = (data.teams || []).map(t => ({ name: t.name, abbr: t.abbr || "", nick: t.nick || "", league: k, logo: t.logo || "" }));
+          const tidy = c => String(c || "").replace(/^FCS · FCS /, "FCS ");
+          list = (data.teams || []).map(t => ({ name: t.name, abbr: t.abbr || "", nick: t.nick || "", short: t.short || "", league: k, logo: t.logo || "", conf: tidy(t.conf) }));
+          confs = (data.conferences || []).map(tidy);
         } catch { /* try ESPN directly below */ }
         if (!list.length) {
           try {
@@ -1195,7 +1199,7 @@
               .map(t => ({ name: t.displayName, abbr: t.abbreviation || "", nick: t.name || "", league: k, logo: (t.logos && t.logos[0] && t.logos[0].href) || "" }));
           } catch { /* shown as "couldn't load" */ }
         }
-        if (list.length) { state.teams[k] = list; store.set(cacheKey, { at: Date.now(), list }); }
+        if (list.length) { state.teams[k] = list; state.confs[k] = confs; store.set(cacheKey, { at: Date.now(), list, confs }); }
         else state.teamsFailed = true;
       })().finally(() => { delete state.teamLoads[k]; }));
     }));
@@ -1228,15 +1232,21 @@
       <div class="field">
         <label for="pickLeague">Favorite teams</label>
         <div class="chips" id="chips"></div>
+        <div class="search-wrap">
+          <input id="teamSearch" type="search" placeholder="🔍 Search teams, e.g. Gophers" autocomplete="off" enterkeyhint="search">
+          <div class="results hidden" id="results"></div>
+        </div>
+        <div class="or muted small">or browse</div>
         <div class="picker stack">
           <select id="pickLeague" aria-label="League"></select>
+          <select id="pickConf" aria-label="Conference" class="hidden"></select>
           <select id="pickTeam" aria-label="Team"></select>
         </div>
         <div class="picker ${d.leagues.includes("ufc") ? "" : "hidden"}" id="fighterRow">
           <input id="fighter" type="text" maxlength="60" placeholder="UFC fighter, e.g. Jon Jones" autocomplete="off">
           <button type="button" class="btn" id="addFighter">Add</button>
         </div>
-        <p class="hint" id="teamHint">Pick a league, then a team. Favorites are starred, listed first, and get ticket links and calendar invites.</p>
+        <p class="hint" id="teamHint">Search, or pick a league (and conference for college), then a team. Favorites are starred, listed first, and get ticket links and calendar invites.</p>
       </div>
 
       <h2>Daily email</h2>
@@ -1290,7 +1300,11 @@
 
     paintChips();
     paintPicker();
-    view.querySelector("#pickLeague").onchange = e => paintPicker(e.target.value);
+    view.querySelector("#pickLeague").onchange = e => { state.pickConf = ""; paintPicker(e.target.value); };
+    view.querySelector("#pickConf").onchange = e => { state.pickConf = e.target.value; paintPicker(); };
+    const search = view.querySelector("#teamSearch");
+    search.oninput = () => paintResults(search.value);
+    search.onfocus = () => loadTeams(d.leagues).then(() => paintResults(search.value));
     view.querySelector("#pickTeam").onchange = e => { if (e.target.value) addFavorite(e.target.value); };
     const fighter = view.querySelector("#fighter");
     view.querySelector("#addFighter").onclick = () => { addFavorite(fighter.value); fighter.value = ""; };
@@ -1331,6 +1345,8 @@
     d.favorite_teams.push(name);
     paintChips();
     paintPicker();
+    const s = document.getElementById("teamSearch");
+    if (s && s.value) { s.value = ""; paintResults(""); }
     toast(`★ ${name} added`);
   }
 
@@ -1356,12 +1372,46 @@
       if (document.getElementById("pickLeague") !== lgSel || lgSel.value !== cur) return;   // screen or league changed meanwhile
     }
     const chosen = new Set(d.favorite_teams.map(t => t.toLowerCase()));
-    const list = [...(state.teams[cur] || [])].sort((a, b) => a.name.localeCompare(b.name));
+    const all = [...(state.teams[cur] || [])].sort((a, b) => a.name.localeCompare(b.name));
+    // College: conference dropdown, and the team list grouped by conference.
+    const confSel = document.getElementById("pickConf");
+    const confs = state.confs[cur] || [];
+    if (confSel) {
+      confSel.classList.toggle("hidden", !confs.length);
+      if (state.pickConf && !confs.includes(state.pickConf)) state.pickConf = "";
+      confSel.innerHTML = `<option value="">All conferences</option>` +
+        confs.map(c => `<option value="${esc(c)}" ${c === state.pickConf ? "selected" : ""}>${esc(c)}</option>`).join("");
+    }
+    const list = confs.length && state.pickConf ? all.filter(t => t.conf === state.pickConf) : all;
+    const opt = t => `<option value="${esc(t.name)}" ${chosen.has(t.name.toLowerCase()) ? "disabled" : ""}>${esc(t.name)}${chosen.has(t.name.toLowerCase()) ? " ★" : ""}</option>`;
     teamSel.disabled = !list.length;
-    teamSel.innerHTML = list.length
-      ? `<option value="">＋ Choose a team…</option>` + list.map(t =>
-          `<option value="${esc(t.name)}" ${chosen.has(t.name.toLowerCase()) ? "disabled" : ""}>${esc(t.name)}${chosen.has(t.name.toLowerCase()) ? " ★" : ""}</option>`).join("")
-      : `<option>Couldn't load teams. Close and reopen the app to try again.</option>`;
+    teamSel.innerHTML = !list.length ? `<option>Couldn't load teams. Close and reopen the app to try again.</option>`
+      : `<option value="">＋ Choose a team…</option>` + (confs.length && !state.pickConf
+        ? confs.map(c => `<optgroup label="${esc(c)}">${list.filter(t => t.conf === c).map(opt).join("")}</optgroup>`).join("")
+        : list.map(opt).join(""));
+  }
+
+  // Search box: matching teams from all your leagues, tap one to add it.
+  function paintResults(q) {
+    const box = document.getElementById("results");
+    if (!box) return;
+    q = q.trim().toLowerCase();
+    if (q.length < 2) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    const d = state.draft;
+    const chosen = new Set(d.favorite_teams.map(t => t.toLowerCase()));
+    const pool = d.leagues.flatMap(k => state.teams[k] || []);
+    const hay = t => [t.name, t.abbr, t.nick, t.short, t.conf].join(" ").toLowerCase();
+    const hits = pool.filter(t => !chosen.has(t.name.toLowerCase()) && (hay(t).includes(q) || t.abbr.toLowerCase() === q))
+      .sort((a, b) => (a.name.toLowerCase().startsWith(q) ? 0 : 1) - (b.name.toLowerCase().startsWith(q) ? 0 : 1) || a.name.localeCompare(b.name))
+      .slice(0, 25);
+    const loading = d.leagues.some(k => LEAGUE[k] && LEAGUE[k].kind !== "fight" && !state.teams[k]);
+    box.innerHTML = hits.length
+      ? hits.map((t, i) => `<button type="button" data-hit="${i}">
+          ${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy">` : ""}<span>${esc(t.name)}</span>
+          <span class="lg">${esc(LEAGUE[t.league].name)}${t.conf ? " · " + esc(t.conf) : ""}</span></button>`).join("")
+      : `<div class="small muted" style="padding:10px 12px">${loading ? "Loading teams…" : "No teams match. Check the spelling, or make sure that league is checked above."}</div>`;
+    box.classList.remove("hidden");
+    box.querySelectorAll("[data-hit]").forEach(b => b.onclick = () => addFavorite(hits[+b.dataset.hit].name));
   }
 
   function clampInt(v, lo, hi, dflt) {
