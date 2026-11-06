@@ -1218,11 +1218,17 @@
       </div>
 
       <div class="field">
-        <label for="teamSearch">Favorite teams${d.leagues.includes("ufc") ? " and fighters" : ""}</label>
+        <label for="pickLeague">Favorite teams</label>
         <div class="chips" id="chips"></div>
-        <input id="teamSearch" type="search" placeholder="Search teams, e.g. Vikings" autocomplete="off">
-        <div class="results hidden" id="results"></div>
-        <p class="hint" id="teamHint">Favorites are starred, listed first, and get ticket links and calendar invites.</p>
+        <div class="picker stack">
+          <select id="pickLeague" aria-label="League"></select>
+          <select id="pickTeam" aria-label="Team"></select>
+        </div>
+        <div class="picker ${d.leagues.includes("ufc") ? "" : "hidden"}" id="fighterRow">
+          <input id="fighter" type="text" maxlength="60" placeholder="UFC fighter, e.g. Jon Jones" autocomplete="off">
+          <button type="button" class="btn" id="addFighter">Add</button>
+        </div>
+        <p class="hint" id="teamHint">Pick a league, then a team. Favorites are starred, listed first, and get ticket links and calendar invites.</p>
       </div>
 
       <h2>Daily email</h2>
@@ -1264,8 +1270,8 @@
       d.leagues = cb.checked ? [...new Set([...d.leagues, k])] : d.leagues.filter(x => x !== k);
       d.leagues = LEAGUES.map(l => l.key).filter(x => d.leagues.includes(x));
       document.getElementById("leagueErr").classList.add("hidden");
-      if (cb.checked) loadTeams([k]);
-      document.querySelector('label[for="teamSearch"]').textContent = "Favorite teams" + (d.leagues.includes("ufc") ? " and fighters" : "");
+      document.getElementById("fighterRow").classList.toggle("hidden", !d.leagues.includes("ufc"));
+      paintPicker(cb.checked && LEAGUE[k].kind !== "fight" ? k : null);
     });
     // simple fields
     view.querySelector("#name").oninput = e => d.name = e.target.value;
@@ -1275,10 +1281,12 @@
     if (PUSH_ON) wireNotify(view, d);
 
     paintChips();
-    const search = view.querySelector("#teamSearch");
-    search.oninput = () => paintResults(search.value);
-    search.onfocus = () => { loadTeams(d.leagues).then(() => paintResults(search.value)); };
-    loadTeams(d.leagues);
+    paintPicker();
+    view.querySelector("#pickLeague").onchange = e => paintPicker(e.target.value);
+    view.querySelector("#pickTeam").onchange = e => { if (e.target.value) addFavorite(e.target.value); };
+    const fighter = view.querySelector("#fighter");
+    view.querySelector("#addFighter").onclick = () => { addFavorite(fighter.value); fighter.value = ""; };
+    fighter.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); addFavorite(fighter.value); fighter.value = ""; } };
 
     view.querySelector("#save").onclick = save;
     view.querySelector("#setpw").onclick = () => renderSetPassword(state.user);
@@ -1310,39 +1318,42 @@
     const d = state.draft;
     name = name.trim().slice(0, 60);
     if (!name) return;
-    if (d.favorite_teams.some(t => t.toLowerCase() === name.toLowerCase())) { toast(`${name} is already a favorite`); return; }
+    if (d.favorite_teams.some(t => t.toLowerCase() === name.toLowerCase())) { toast(`${name} is already a favorite`); paintPicker(); return; }
     if (d.favorite_teams.length >= 60) { toast("That's the limit of 60 favorites"); return; }
     d.favorite_teams.push(name);
     paintChips();
-    const s = document.getElementById("teamSearch");
-    s.value = ""; paintResults("");
-    s.focus();
+    paintPicker();
+    toast(`★ ${name} added`);
   }
 
-  function paintResults(q) {
-    const box = document.getElementById("results");
-    if (!box) return;
-    q = q.trim().toLowerCase();
-    if (q.length < 2) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+  // League dropdown + team dropdown (teams load from ESPN for the chosen league).
+  async function paintPicker(leagueKey) {
     const d = state.draft;
+    const lgSel = document.getElementById("pickLeague"), teamSel = document.getElementById("pickTeam");
+    if (!lgSel || !teamSel) return;
+    const teamLeagues = d.leagues.filter(k => LEAGUE[k] && LEAGUE[k].kind !== "fight");
+    if (!teamLeagues.length) {
+      lgSel.innerHTML = `<option>Pick a league above first</option>`; lgSel.disabled = true;
+      teamSel.innerHTML = ""; teamSel.classList.add("hidden");
+      return;
+    }
+    lgSel.disabled = false;
+    const cur = leagueKey && teamLeagues.includes(leagueKey) ? leagueKey
+      : teamLeagues.includes(lgSel.value) ? lgSel.value : teamLeagues[0];
+    lgSel.innerHTML = teamLeagues.map(k => `<option value="${k}" ${k === cur ? "selected" : ""}>${esc(LEAGUE[k].name)}</option>`).join("");
+    teamSel.classList.remove("hidden");
+    if (!state.teams[cur]) {
+      teamSel.disabled = true; teamSel.innerHTML = `<option>Loading teams…</option>`;
+      await loadTeams([cur]);
+      if (document.getElementById("pickLeague") !== lgSel || lgSel.value !== cur) return;   // screen or league changed meanwhile
+    }
     const chosen = new Set(d.favorite_teams.map(t => t.toLowerCase()));
-    const pool = d.leagues.flatMap(k => state.teams[k] || []);
-    const seen = new Set();
-    const hits = pool.filter(t => !chosen.has(t.name.toLowerCase()) &&
-        (t.name.toLowerCase().includes(q) || t.abbr.toLowerCase() === q || t.nick.toLowerCase().startsWith(q)))
-      .filter(t => (seen.has(t.name) ? false : seen.add(t.name)))
-      .sort((a, b) => (a.name.toLowerCase().startsWith(q) ? 0 : 1) - (b.name.toLowerCase().startsWith(q) ? 0 : 1))
-      .slice(0, 15);
-    const raw = document.getElementById("teamSearch").value.trim();
-    const custom = d.leagues.includes("ufc") ? `Add "${raw}" (fighter or other name)` : `Add "${raw}" as typed`;
-    box.innerHTML = hits.map((t, i) => `<button type="button" data-hit="${i}">
-        ${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy">` : ""}${esc(t.name)}<span class="lg">${esc(LEAGUE[t.league].name)}</span></button>`).join("")
-      + `<button type="button" data-custom>${esc(custom)}</button>`;
-    box.classList.remove("hidden");
-    box.querySelectorAll("[data-hit]").forEach(b => b.onclick = () => addFavorite(hits[+b.dataset.hit].name));
-    box.querySelector("[data-custom]").onclick = () => addFavorite(raw);
-    const hint = document.getElementById("teamHint");
-    if (state.teamsFailed && hint) hint.textContent = "Team search couldn't reach ESPN right now. You can still add a team by typing its full name, like \"Minnesota Vikings\".";
+    const list = [...(state.teams[cur] || [])].sort((a, b) => a.name.localeCompare(b.name));
+    teamSel.disabled = !list.length;
+    teamSel.innerHTML = list.length
+      ? `<option value="">＋ Choose a team…</option>` + list.map(t =>
+          `<option value="${esc(t.name)}" ${chosen.has(t.name.toLowerCase()) ? "disabled" : ""}>${esc(t.name)}${chosen.has(t.name.toLowerCase()) ? " ★" : ""}</option>`).join("")
+      : `<option>Couldn't load teams. Try again later.</option>`;
   }
 
   function clampInt(v, lo, hi, dflt) {

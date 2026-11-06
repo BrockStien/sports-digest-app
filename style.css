@@ -214,3 +214,12 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 
 /* Info message on the sign-in screen (e.g. "Check your email") */
 .notice { background: var(--card); border: 1px solid var(--rule); color: var(--ink); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.4; text-align: left; }
+
+/* Favorite team picker: league dropdown + team dropdown */
+.picker { display: flex; gap: 8px; margin-top: 4px; }
+.picker.stack { flex-direction: column; }
+.picker.stack select { flex: none; }
+.picker select, .picker input { flex: 1; min-width: 0; width: 100%; }
+.picker .btn { flex: 0 0 auto; }
+.picker + .picker { margin-top: 8px; }
+.picker.hidden, select.hidden { display: none; }
