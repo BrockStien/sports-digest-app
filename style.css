@@ -226,3 +226,8 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .search-wrap { margin-top: 4px; }
 .or { text-align: center; margin: 10px 0 2px; }
 .results .lg { text-align: right; }
+
+/* Golf leaderboards and race results */
+.bout .pos { display: inline-block; min-width: 2.4em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bout.mine { font-weight: 600; }
+.sessions { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin-top: 6px; }

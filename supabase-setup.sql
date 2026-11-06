@@ -21,7 +21,7 @@ create table if not exists public.subscribers (
   updated_at               timestamptz not null default now(),
 
   -- Keep values sane even if someone pokes at the database directly.
-  constraint leagues_valid   check (leagues <@ array['nfl','nba','nhl','mlb','cfb','cbb','ufc']),
+  constraint leagues_valid   check (leagues <@ array['nfl','nba','nhl','mlb','cfb','cbb','ufc','pga','f1','nascar']),
   constraint calendar_valid  check (calendar_links in ('all','favorites','none')),
   constraint tickets_valid   check (ticket_links  in ('all','favorites','none')),
   constraint headlines_valid check (headlines_per_league between 0 and 10),

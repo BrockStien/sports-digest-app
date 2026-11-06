@@ -21,9 +21,16 @@
     { key: "cbb", name: "Men's College Basketball", path: "basketball/mens-college-basketball",
       params: { groups: "50", limit: "400" }, teamParams: { limit: "1000" }, busy: 12 },
     { key: "ufc", name: "UFC", path: "mma/ufc", kind: "fight" },
+    { key: "pga", name: "PGA Tour Golf", path: "golf/pga", kind: "golf" },
+    { key: "f1", name: "Formula 1", path: "racing/f1", kind: "race" },
+    { key: "nascar", name: "NASCAR Cup Series", path: "racing/nascar-premier", kind: "race" },
   ];
+  // Individual sports: favorites are people (fighters, golfers, drivers), shown as one "event" card.
+  const PEOPLE = { fight: "fighter", golf: "golfer", race: "driver" };
+  const isPeople = k => !!(LEAGUE[k] && LEAGUE[k].kind);
+  const isEvent = g => g.kind !== "game";
   const LEAGUE = Object.fromEntries(LEAGUES.map(l => [l.key, l]));
-  const GAME_HOURS = { nfl: 3.5, cfb: 3.5, nba: 2.5, nhl: 2.5, mlb: 3, cbb: 2, ufc: 5 };
+  const GAME_HOURS = { nfl: 3.5, cfb: 3.5, nba: 2.5, nhl: 2.5, mlb: 3, cbb: 2, ufc: 5, pga: 5, f1: 2, nascar: 4 };
   const TIMEZONES = [
     ["America/New_York", "Eastern"], ["America/Chicago", "Central"], ["America/Denver", "Mountain"],
     ["America/Phoenix", "Arizona"], ["America/Los_Angeles", "Pacific"], ["America/Anchorage", "Alaska"],
@@ -187,10 +194,60 @@
       link: ((e.links || [])[0] || {}).href || "", tickets: state === "pre" ? tickets(last) : null, odds: "",
     };
   }
+  // Golf: one tournament per week, with a leaderboard.
+  function athlete(c) {
+    const a = c.athlete || {};
+    const name = a.displayName || a.fullName || a.shortName || "?";
+    return { name, short: a.shortName || name, flag: (a.flag || {}).href || "", order: Number(c.order) || 999, score: c.score != null ? String(c.score) : "", winner: !!c.winner };
+  }
+  function eventBase(e, lg, comp, kind) {
+    const st = ((comp.status || e.status || {}).type) || {};
+    const evSt = ((e.status || {}).type) || {};
+    const bc = [].concat(...(comp.broadcasts || []).map(b => b.names || []));
+    return {
+      kind, league: lg, id: e.id, key: `${lg}:${e.id}`, card: e.name || e.shortName || LEAGUE[lg].name,
+      state: evSt.state || st.state || "pre", detail: st.shortDetail || st.detail || "",
+      start: comp.date || e.date ? new Date(comp.date || e.date) : null, tbd: comp.timeValid === false, postponed: false,
+      tv: [...new Set(bc)].join(", "), odds: "", tickets: null,
+      venue: (comp.venue || e.venue || {}).fullName || (e.circuit || {}).fullName || "",
+      link: ((e.links || []).find(l => (l.rel || []).includes("summary")) || (e.links || [])[0] || {}).href || "",
+    };
+  }
+  function parseGolf(e, lg) {
+    const comp = (e.competitions || [{}])[0];
+    const players = (comp.competitors || []).map(athlete).sort((a, b) => a.order - b.order);
+    // Position with ties ("T3") from equal scores.
+    players.forEach((p, i) => {
+      const tied = players.filter(q => q.score === p.score).length > 1;
+      const first = players.find(q => q.score === p.score) || p;
+      const n = first.order < 999 ? first.order : players.indexOf(first) + 1;
+      p.pos = p.score ? (tied ? "T" : "") + n : String(i + 1);
+    });
+    return { ...eventBase(e, lg, comp, "golf"), players, tbd: true };
+  }
+  // Racing: F1 weekends have practice/qualifying/race sessions; NASCAR has the race.
+  function parseRace(e, lg) {
+    const comps = e.competitions || [{}];
+    const label = c => ((c.type || {}).abbreviation || "").replace(/^Qual$/, "Qualifying");
+    const race = comps.find(c => /^race$/i.test((c.type || {}).abbreviation || "")) || comps[comps.length - 1] || {};
+    const sessions = comps.map(c => ({ name: label(c) || "Race", state: (((c.status || {}).type) || {}).state || "pre",
+      start: c.date ? new Date(c.date) : null, results: (c.competitors || []).map(athlete).sort((a, b) => a.order - b.order) }));
+    const ev = eventBase(e, lg, race, "race");
+    const raceSt = (((race.status || {}).type) || {}).state || "pre";
+    // The weekend is "live" while any session runs, and final once the race is done.
+    const anyIn = sessions.some(x => x.state === "in");
+    ev.state = raceSt === "post" ? "post" : anyIn || raceSt === "in" ? "in" : "pre";
+    ev.players = sessions.flatMap(x => x.results).filter((p, i, a) => a.findIndex(q => q.name === p.name) === i);
+    ev.sessions = sessions;
+    ev.results = (sessions.find(x => /^race$/i.test(x.name)) || sessions[sessions.length - 1] || { results: [] }).results;
+    return ev;
+  }
   function isFav(g, favs) {
     if (!favs.size) return false;
     const names = new Set();
-    if (g.kind === "fight") {
+    if (g.kind === "golf" || g.kind === "race") {
+      g.players.forEach(f => [f.name, f.short, f.name.split(" ").pop()].forEach(n => n && names.add(n.toLowerCase())));
+    } else if (g.kind === "fight") {
       g.bouts.forEach(b => [b.a, b.b].forEach(f => [f.name, f.short, f.name.split(" ").pop()].forEach(n => n && names.add(n.toLowerCase()))));
     } else {
       [g.home, g.away].forEach(t => [t.abbr, t.name, t.full].forEach(n => n && names.add(n.toLowerCase())));
@@ -209,13 +266,13 @@
       return { label: price ? `Tickets from ${price}` : "Tickets", url: g.tickets.url };
     }
     const d = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "long", day: "numeric", year: "numeric" }).format(g.start);
-    const matchup = g.kind === "fight" ? g.card : `${g.away.full} vs ${g.home.full}`;
+    const matchup = isEvent(g) ? g.card : `${g.away.full} vs ${g.home.full}`;
     return { label: "Find tickets", url: "https://www.google.com/search?q=" + encodeURIComponent(`${matchup} tickets ${d}`) };
   }
   const utcStamp = d => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   function calendarLink(g, fav, s) {
     if (!upcoming(g) || !wanted(s.calendar_links, fav)) return null;
-    const title = g.kind === "fight" ? g.card : `${g.away.name} @ ${g.home.name}`;
+    const title = isEvent(g) ? g.card : `${g.away.name} @ ${g.home.name}`;
     let dates;
     if (g.tbd) {
       const ny = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -270,7 +327,7 @@
     state.sub = data;
     state.draft = { ...DEFAULTS, ...(data || {}) };
     const joinCode = (location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/) || [])[1] || store.get("pendingJoin");
-    const chatLink = location.hash.match(/^#chat\/([0-9a-f-]{36})(?:\/([a-z]{3,4}:\d+|general))?$/);
+    const chatLink = location.hash.match(/^#chat\/([0-9a-f-]{36})(?:\/([a-z0-9]{2,8}:\d+|general))?$/);
     state.tab = data ? (location.hash === "#games" ? "today" : (store.get("tab") || "today")) : "teams";
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     if (data) loadGroups().then(() => { if (state.tab === "today" && state.days[state.day]) paintToday(); paintChatBadge(); });
@@ -451,7 +508,7 @@
       const lg = LEAGUE[key];
       try {
         const data = await getJSON(`${ESPN}/${lg.path}/scoreboard?` + qs({ ...(lg.params || {}), dates: ymd }));
-        const parse = lg.kind === "fight" ? parseCard : parseGame;
+        const parse = { fight: parseCard, golf: parseGolf, race: parseRace }[lg.kind] || parseGame;
         return { league: key, games: (data.events || []).map(e => parse(e, key)) };
       } catch (e) {
         return { league: key, games: [], error: true };
@@ -532,9 +589,9 @@
       const order = { in: 0, pre: 1, post: 2 };
       games.sort((a, b) => (b.fav - a.fav) || (order[a.g.state] - order[b.g.state]) || ((a.g.start || 0) - (b.g.start || 0)));
       shown += games.length;
-      const unit = lg.kind === "fight" ? "card" : "game";
+      const unit = { fight: "card", golf: "tournament", race: "race" }[lg.kind] || "game";
       html += `<section class="card"><div class="card-head">${esc(lg.name)}<span>${games.length} ${unit}${games.length === 1 ? "" : "s"}</span></div>
-        ${games.map(x => x.g.kind === "fight" ? cardRow(x.g, x.fav, s) : gameRow(x.g, x.fav, s)).join("")}
+        ${games.map(x => x.g.kind === "fight" ? cardRow(x.g, x.fav, s) : isEvent(x.g) ? eventRow(x.g, x.fav, s) : gameRow(x.g, x.fav, s)).join("")}
         ${hidden ? `<div class="more"><button class="btn link" data-showall>Show ${hidden} more unranked games</button></div>` : ""}
       </section>`;
     }
@@ -682,6 +739,11 @@
     [/^(mlb network|mlbn)$/, "On TV, or MLB.TV"],
     [/^youtube$/, "Free on YouTube"],
     [/^(espn\+ ppv|ppv|pay-per-view)$/, "Pay-per-view in the ESPN app"],
+    [/^(golf chnl|golf channel|gc)$/, "On cable, or stream on Peacock"],
+    [/^(hbo max|max)$/, "Stream on HBO Max"],
+    [/^(usa|usa network)$/, "On cable or a live-TV streaming service"],
+    [/^(cw|the cw)$/, "On TV (free with an antenna), or the CW app"],
+    [/^(f1 tv|f1tv)$/, "Stream on F1 TV"],
   ];
   function watchInfo(g) {
     const names = (g.tv || "").split(",").map(x => x.trim()).filter(Boolean);
@@ -762,6 +824,43 @@
       <div class="matchup"><strong>${fav ? '<span class="star">★</span> ' : ""}${esc(g.card)}</strong><span class="when">${when}</span></div>
       ${[g.tv, g.venue].filter(Boolean).length ? `<div class="meta">${esc([g.tv, g.venue].filter(Boolean).join(" · "))}</div>` : ""}
       <div style="margin-top:6px">${bouts}</div>
+      ${actions(g, fav, s)}
+    </div>`;
+  }
+
+  // Golf leaderboard / race results card.
+  function eventRow(g, fav, s) {
+    const favs = new Set(s.favorite_teams.map(t => t.toLowerCase()));
+    const mine = p => [p.name, p.short, p.name.split(" ").pop()].some(n => favs.has(n.toLowerCase()));
+    const line = (pos, p, extra) => `<div class="bout ${mine(p) ? "mine" : ""}"><span class="pos">${esc(pos)}</span>${mine(p) ? '<span class="star">★</span> ' : ""}${esc(p.name)}${extra ? ` <span class="rec">${esc(extra)}</span>` : ""}</div>`;
+    const top = (list, n, fmt) => {
+      const shown = list.slice(0, n);
+      const extraFavs = list.slice(n).filter(mine);     // your golfers/drivers further down
+      return shown.map(fmt).join("") + (extraFavs.length ? `<div class="bout muted small">…</div>` + extraFavs.map(fmt).join("") : "");
+    };
+    let body = "", when;
+    if (g.kind === "golf") {
+      when = g.state === "in" ? `<span class="status live">● ${esc(g.detail || "Live")}</span>` : g.state === "post" ? "Final" : esc(new Intl.DateTimeFormat("en-US", { timeZone: s.timezone, weekday: "short", month: "short", day: "numeric" }).format(g.start));
+      body = g.players.length && g.state !== "pre" ? top(g.players, 5, p => line(p.pos, p, p.score === "0" ? "E" : p.score)) : `<div class="bout muted">${g.players.length} players in the field</div>`;
+    } else {
+      const next = g.sessions.find(x => x.state !== "post");
+      const live = g.sessions.find(x => x.state === "in");
+      when = live ? `<span class="status live">● ${esc(live.name)}</span>` : g.state === "post" ? "Final"
+        : g.start ? esc((g.sessions.length > 1 ? "Race " : "") + new Intl.DateTimeFormat("en-US", { timeZone: s.timezone, weekday: "short", hour: "numeric", minute: "2-digit" }).format(g.start)) : "";
+      if (g.state === "post" && g.results.length) {
+        body = top(g.results, 3, p => line(["🥇", "🥈", "🥉"][p.order - 1] || `P${p.order}`, p, ""));
+      } else {
+        const done = [...g.sessions].reverse().find(x => x.state !== "pre" && x.results.length);
+        if (done) body += `<div class="bout muted small">${esc(done.name)}${done.state === "in" ? " (live)" : ""}:</div>` + top(done.results, 3, p => line(`P${p.order}`, p, ""));
+        if (g.sessions.length > 1) body += `<div class="sessions">${g.sessions.filter(x => x.state !== "post").map(x =>
+          `<span>${esc(x.name)} <span class="muted">${x.start ? esc(new Intl.DateTimeFormat("en-US", { timeZone: s.timezone, weekday: "short", hour: "numeric", minute: "2-digit" }).format(x.start)) : ""}</span></span>`).join("")}</div>`;
+        if (!body && next) body = `<div class="bout muted">${esc(g.detail)}</div>`;
+      }
+    }
+    return `<div class="row ${fav ? "fav" : ""}">
+      <div class="matchup"><strong>${fav ? '<span class="star">★</span> ' : ""}${esc(g.card)}</strong><span class="when">${when}</span></div>
+      ${[g.tv, g.venue].filter(Boolean).length ? `<div class="meta">${esc([g.tv, g.venue].filter(Boolean).join(" · "))}</div>` : ""}
+      <div style="margin-top:6px">${body}</div>
       ${actions(g, fav, s)}
     </div>`;
   }
@@ -1116,14 +1215,14 @@
     return null;
   }
   function scoreLine(g) {
-    if (g.kind === "fight") return `<strong>${esc(g.card)}</strong> · ${g.state === "in" ? '<span class="live">● Live</span>' : g.state === "post" ? "Final" : esc(timeIn(g.start, state.sub.timezone))}`;
+    if (isEvent(g)) return `<strong>${esc(g.card)}</strong> · ${g.state === "in" ? '<span class="live">● Live</span>' : g.state === "post" ? "Final" : esc(timeIn(g.start, state.sub.timezone))}`;
     const st = g.state === "in" ? `<span class="live">● ${esc(g.detail)}</span>` : g.state === "post" ? esc(g.detail || "Final") : esc(g.tbd ? "Time TBD" : timeIn(g.start, state.sub.timezone));
     const sc = g.state === "pre" ? "" : ` ${esc(g.away.score)}–${esc(g.home.score)}`;
     return `<strong>${esc(g.away.name)} @ ${esc(g.home.name)}</strong>${sc} · ${st}`;
   }
   function gameTitle(g) {
     const day = new Intl.DateTimeFormat("en-US", { timeZone: state.sub.timezone, weekday: "short", month: "short", day: "numeric" }).format(g.start || new Date());
-    return (g.kind === "fight" ? g.card : `${g.away.name} @ ${g.home.name}`).slice(0, 60) + " · " + day;
+    return (isEvent(g) ? g.card : `${g.away.name} @ ${g.home.name}`).slice(0, 60) + " · " + day;
   }
 
   // 💬 Discuss on a game: open (or start) that game's thread in one of your groups.
@@ -1135,7 +1234,7 @@
     if (groups.length === 1) return openGroup(groups[0].id, key, gameTitle(g));
     const pick = document.createElement("div");
     pick.className = "sheet";
-    pick.innerHTML = `<div class="sheet-card" role="dialog" aria-label="Choose a group"><div class="label">Discuss ${esc(g.kind === "fight" ? g.card : g.away.name + " @ " + g.home.name)} in…</div>
+    pick.innerHTML = `<div class="sheet-card" role="dialog" aria-label="Choose a group"><div class="label">Discuss ${esc(isEvent(g) ? g.card : g.away.name + " @ " + g.home.name)} in…</div>
       ${groups.map(x => `<button type="button" class="btn block" data-g="${esc(x.id)}" style="margin-top:8px">${esc(x.name)}</button>`).join("")}
       <button type="button" class="btn link block" id="cancelPick">Cancel</button></div>`;
     document.body.appendChild(pick);
@@ -1176,13 +1275,13 @@
   // ---------------------------------------------------------------- my teams
   // Team lists come through our Supabase "teams" function (ESPN doesn't let web pages load them directly).
   async function loadTeams(keys) {
-    await Promise.all(keys.filter(k => !state.teams[k] && LEAGUE[k] && LEAGUE[k].kind !== "fight").map(k => {
+    await Promise.all(keys.filter(k => !state.teams[k] && LEAGUE[k]).map(k => {
       state.teamLoads = state.teamLoads || {};
       if (state.teamLoads[k]) return state.teamLoads[k];        // already loading: wait for that one
       return (state.teamLoads[k] = (async () => {
         const cacheKey = "teams3:" + k;
         const cached = store.get(cacheKey);
-        if (cached && cached.list && cached.list.length && Date.now() - cached.at < 7 * 864e5) { state.teams[k] = cached.list; state.confs[k] = cached.confs || []; return; }
+        if (cached && cached.list && cached.list.length && Date.now() - cached.at < (isPeople(k) ? 864e5 : 7 * 864e5)) { state.teams[k] = cached.list; state.confs[k] = cached.confs || []; return; }
         let confs = [];
         let list = [];
         try {
@@ -1191,7 +1290,7 @@
           list = (data.teams || []).map(t => ({ name: t.name, abbr: t.abbr || "", nick: t.nick || "", short: t.short || "", league: k, logo: t.logo || "", conf: tidy(t.conf) }));
           confs = (data.conferences || []).map(tidy);
         } catch { /* try ESPN directly below */ }
-        if (!list.length) {
+        if (!list.length && !isPeople(k)) {
           try {
             const lg = LEAGUE[k];
             const data = await getJSON(`${ESPN}/${lg.path}/teams?` + qs(lg.teamParams || { limit: "100" }));
@@ -1242,11 +1341,11 @@
           <select id="pickConf" aria-label="Conference" class="hidden"></select>
           <select id="pickTeam" aria-label="Team"></select>
         </div>
-        <div class="picker ${d.leagues.includes("ufc") ? "" : "hidden"}" id="fighterRow">
-          <input id="fighter" type="text" maxlength="60" placeholder="UFC fighter, e.g. Jon Jones" autocomplete="off">
+        <div class="picker ${d.leagues.some(isPeople) ? "" : "hidden"}" id="fighterRow">
+          <input id="fighter" type="text" maxlength="60" placeholder="${esc(peoplePlaceholder(d))}" autocomplete="off">
           <button type="button" class="btn" id="addFighter">Add</button>
         </div>
-        <p class="hint" id="teamHint">Search, or pick a league (and conference for college), then a team. Favorites are starred, listed first, and get ticket links and calendar invites.</p>
+        <p class="hint" id="teamHint">Search, or pick a league (and its conference or division), then a team. For golf, racing and UFC you pick people. Favorites are starred, listed first, and get ticket links and calendar invites.</p>
       </div>
 
       <h2>Daily email</h2>
@@ -1288,8 +1387,9 @@
       d.leagues = cb.checked ? [...new Set([...d.leagues, k])] : d.leagues.filter(x => x !== k);
       d.leagues = LEAGUES.map(l => l.key).filter(x => d.leagues.includes(x));
       document.getElementById("leagueErr").classList.add("hidden");
-      document.getElementById("fighterRow").classList.toggle("hidden", !d.leagues.includes("ufc"));
-      paintPicker(cb.checked && LEAGUE[k].kind !== "fight" ? k : null);
+      document.getElementById("fighterRow").classList.toggle("hidden", !d.leagues.some(isPeople));
+      document.getElementById("fighter").placeholder = peoplePlaceholder(d);
+      paintPicker(cb.checked ? k : null);
     });
     // simple fields
     view.querySelector("#name").oninput = e => d.name = e.target.value;
@@ -1336,6 +1436,12 @@
     });
   }
 
+  // "Not listed? Add a golfer or driver" (lists only show this week's golf field and current drivers).
+  function peoplePlaceholder(d) {
+    const kinds = [...new Set(d.leagues.filter(isPeople).map(k => PEOPLE[LEAGUE[k].kind]))];
+    return `Not listed? Type a ${kinds.join(" or ") || "name"}`;
+  }
+
   function addFavorite(name) {
     const d = state.draft;
     name = name.trim().slice(0, 60);
@@ -1355,7 +1461,7 @@
     const d = state.draft;
     const lgSel = document.getElementById("pickLeague"), teamSel = document.getElementById("pickTeam");
     if (!lgSel || !teamSel) return;
-    const teamLeagues = d.leagues.filter(k => LEAGUE[k] && LEAGUE[k].kind !== "fight");
+    const teamLeagues = d.leagues.filter(k => LEAGUE[k]);
     if (!teamLeagues.length) {
       lgSel.innerHTML = `<option>Pick a league above first</option>`; lgSel.disabled = true;
       teamSel.innerHTML = ""; teamSel.classList.add("hidden");
@@ -1379,14 +1485,17 @@
     if (confSel) {
       confSel.classList.toggle("hidden", !confs.length);
       if (state.pickConf && !confs.includes(state.pickConf)) state.pickConf = "";
-      confSel.innerHTML = `<option value="">All conferences</option>` +
+      const word = ["cfb", "cbb"].includes(cur) ? "conferences" : "divisions";
+      confSel.innerHTML = `<option value="">All ${word}</option>` +
         confs.map(c => `<option value="${esc(c)}" ${c === state.pickConf ? "selected" : ""}>${esc(c)}</option>`).join("");
     }
     const list = confs.length && state.pickConf ? all.filter(t => t.conf === state.pickConf) : all;
     const opt = t => `<option value="${esc(t.name)}" ${chosen.has(t.name.toLowerCase()) ? "disabled" : ""}>${esc(t.name)}${chosen.has(t.name.toLowerCase()) ? " ★" : ""}</option>`;
     teamSel.disabled = !list.length;
-    teamSel.innerHTML = !list.length ? `<option>Couldn't load teams. Close and reopen the app to try again.</option>`
-      : `<option value="">＋ Choose a team…</option>` + (confs.length && !state.pickConf
+    teamSel.innerHTML = !list.length ? (isPeople(cur)
+        ? `<option>No list right now. Type a name in the box below.</option>`
+        : `<option>Couldn't load teams. Close and reopen the app to try again.</option>`)
+      : `<option value="">＋ Choose a ${isPeople(cur) ? PEOPLE[LEAGUE[cur].kind] : "team"}…</option>` + (confs.length && !state.pickConf
         ? confs.map(c => `<optgroup label="${esc(c)}">${list.filter(t => t.conf === c).map(opt).join("")}</optgroup>`).join("")
         : list.map(opt).join(""));
   }
@@ -1404,7 +1513,7 @@
     const hits = pool.filter(t => !chosen.has(t.name.toLowerCase()) && (hay(t).includes(q) || t.abbr.toLowerCase() === q))
       .sort((a, b) => (a.name.toLowerCase().startsWith(q) ? 0 : 1) - (b.name.toLowerCase().startsWith(q) ? 0 : 1) || a.name.localeCompare(b.name))
       .slice(0, 25);
-    const loading = d.leagues.some(k => LEAGUE[k] && LEAGUE[k].kind !== "fight" && !state.teams[k]);
+    const loading = d.leagues.some(k => LEAGUE[k] && !state.teams[k]);
     box.innerHTML = hits.length
       ? hits.map((t, i) => `<button type="button" data-hit="${i}">
           ${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy">` : ""}<span>${esc(t.name)}</span>
@@ -1587,7 +1696,7 @@
   // Tapping a notification opens .../#games, possibly in an already-open app.
   window.addEventListener("hashchange", () => {
     const j = location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/);
-    const c = location.hash.match(/^#chat\/([0-9a-f-]{36})(?:\/([a-z]{3,4}:\d+|general))?$/);
+    const c = location.hash.match(/^#chat\/([0-9a-f-]{36})(?:\/([a-z0-9]{2,8}:\d+|general))?$/);
     if (j || c) {
       history.replaceState(null, "", location.pathname + location.search);
       if (!state.sub) { if (j) store.set("pendingJoin", j[1]); return; }

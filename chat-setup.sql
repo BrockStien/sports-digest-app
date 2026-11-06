@@ -36,7 +36,7 @@ create table if not exists public.messages (
   body         text not null,
   deleted      boolean not null default false,
   created_at   timestamptz not null default now(),
-  constraint thread_valid      check (thread = 'general' or thread ~ '^[a-z]{3,4}:[0-9]{1,15}$'),
+  constraint thread_valid      check (thread = 'general' or thread ~ '^[a-z0-9]{2,8}:[0-9]{1,15}$'),
   constraint thread_title_size check (char_length(thread_title) <= 80),
   constraint body_length       check (deleted or char_length(btrim(body)) between 1 and 1000)
 );
