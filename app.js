@@ -238,7 +238,13 @@
       $app.innerHTML = `<div class="center"><p>Couldn't load the sign-in library. Check your connection and refresh.</p></div>`;
       return;
     }
+    const h = location.hash;
+    if (/type=recovery/.test(h)) state.recovering = true;
+    const linkErr = /error_code=otp_expired|error=access_denied/.test(h)
+      ? "That email link has expired or was already used. Sign in, or tap \"Forgot password?\" for a new one." : "";
+    if (linkErr) history.replaceState(null, "", location.pathname + location.search);
     sb.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") { state.recovering = true; if (session) renderSetPassword(session.user); return; }
       if (event === "SIGNED_OUT") { stopLive(); state.user = null; state.sub = null; state.chat = { ok: null, groups: null, groupId: null, thread: null, threadTitle: "", members: [], channel: null, poll: null, showSettings: false }; renderSignIn(); }
       if (event === "SIGNED_IN" && session && (!state.user || state.user.id !== session.user.id)) loadAccount(session.user);
     });
@@ -246,11 +252,12 @@
     if (pj) store.set("pendingJoin", pj);
     const { data } = await sb.auth.getSession();
     if (data && data.session) await loadAccount(data.session.user);
-    else renderSignIn();
+    else renderSignIn(linkErr);
   }
 
   async function loadAccount(user) {
     state.user = user;
+    if (state.recovering) return renderSetPassword(user);
     $app.innerHTML = `<div class="center muted">Loading your teams…</div>`;
     const { data, error } = await sb.from("subscribers").select("*").eq("id", user.id).maybeSingle();
     if (error) {
@@ -281,22 +288,131 @@
       Supabase project URL and anon public key (see the setup guide, step 3).</p></div>`;
   }
 
-  function renderSignIn(errorMsg = "") {
+  // Sign in with email + password. (The emailed code still works as a backup.)
+  function renderSignIn(errorMsg = "", mode = "signin", notice = "") {
+    $app.className = "no-tabs";
+    const up = mode === "signup";
+    $app.innerHTML = `<div class="signin">
+      <img class="brand" src="icons/icon-192.png" alt="">
+      <div class="kicker">${esc(APP_NAME)}</div>
+      <h1>${up ? "Create your account" : "Your teams, every morning"}</h1>
+      <p class="muted">${up ? "Pick a password you'll use to sign in on any device."
+        : "Scores, today's games, tickets and calendar invites, plus a daily email with just the teams you follow."}</p>
+      ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
+      <form id="pwForm" class="field" novalidate>
+        <label for="email">Email</label>
+        <input id="email" type="email" inputmode="email" autocomplete="${up ? "email" : "username"}" placeholder="name@example.com" value="${esc(state.pendingEmail)}" required>
+        <label for="password" style="margin-top:10px">Password</label>
+        <input id="password" type="password" autocomplete="${up ? "new-password" : "current-password"}" minlength="8" placeholder="${up ? "At least 8 characters" : ""}" required>
+        <p class="error ${errorMsg ? "" : "hidden"}" id="err">${esc(errorMsg)}</p>
+        <button class="btn primary block" style="margin-top:12px" id="go">${up ? "Create account" : "Sign in"}</button>
+      </form>
+      ${up ? `<button class="btn link" id="toSignin">Already have an account? Sign in</button>`
+           : `<button class="btn link" id="toSignup">New here? Create an account</button>
+              <button class="btn link" id="forgot">Forgot password? (or first time setting one)</button>
+              <button class="btn link" id="useCode">Email me a sign-in code instead</button>`}
+      ${installHint()}
+    </div>`;
+    const $ = id => document.getElementById(id);
+    const email = () => $("email").value.trim();
+    const show = msg => { $("err").textContent = msg; $("err").classList.remove("hidden"); };
+    const okEmail = () => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email()) || (show("Enter a valid email address."), false);
+    const remember = () => { state.pendingEmail = email(); };
+    if (up) $("toSignin").onclick = () => { remember(); renderSignIn("", "signin"); };
+    else {
+      $("toSignup").onclick = () => { remember(); renderSignIn("", "signup"); };
+      $("useCode").onclick = () => { remember(); renderCodeRequest(); };
+      $("forgot").onclick = async () => {
+        if (!okEmail()) return;
+        remember();
+        const { error } = await sb.auth.resetPasswordForEmail(email(), { redirectTo: location.origin + location.pathname });
+        if (error) return show(friendly(error));
+        renderSignIn("", "signin", `We emailed a link to ${email()}. Open it, choose a password, then come back here and sign in.`);
+      };
+    }
+    $("pwForm").onsubmit = async ev => {
+      ev.preventDefault();
+      if (!okEmail()) return;
+      const password = $("password").value;
+      if (up && password.length < 8) return show("Use at least 8 characters.");
+      if (!password) return show("Enter your password.");
+      remember();
+      const btn = $("go"); btn.disabled = true; btn.textContent = up ? "Creating…" : "Signing in…";
+      const res = up
+        ? await sb.auth.signUp({ email: email(), password, options: { emailRedirectTo: location.origin + location.pathname } })
+        : await sb.auth.signInWithPassword({ email: email(), password });
+      btn.disabled = false; btn.textContent = up ? "Create account" : "Sign in";
+      if (res.error) {
+        if (!up && /invalid login/i.test(res.error.message))
+          return show("Wrong email or password. If you used to sign in with a code, tap \"Forgot password?\" to set one.");
+        if (/not confirmed/i.test(res.error.message))
+          return show("Confirm your email first: open the link we emailed you, then sign in here.");
+        return show(friendly(res.error));
+      }
+      if (res.data.session) return loadAccount(res.data.session.user);
+      if (up && res.data.user && Array.isArray(res.data.user.identities) && res.data.user.identities.length === 0)
+        return show("That email already has an account. Sign in instead, or tap \"Forgot password?\" on the sign-in screen.");
+      // Email confirmation is on: they tap the link once, then sign in with their password.
+      renderSignIn("", "signin", `Almost done! We emailed a link to ${email()}. Open it to confirm your email, then come back here and sign in.`);
+    };
+  }
+
+  function friendly(error) {
+    const m = (error && error.message) || "Something went wrong.";
+    if (/rate|seconds|limit/i.test(m)) return "Too many tries. Wait a minute, then try again.";
+    if (/already registered|already exists/i.test(m)) return "That email already has an account. Sign in instead (or tap \"Forgot password?\").";
+    if (/weak|pwned|easy to guess/i.test(m)) return "That password is too easy to guess. Try a longer one.";
+    return m;
+  }
+
+  // Set a new password (after opening a "reset password" email link, or from My Teams).
+  function renderSetPassword(user) {
+    $app.className = "no-tabs";
+    $app.innerHTML = `<div class="signin">
+      <img class="brand" src="icons/icon-192.png" alt="">
+      <h1>Choose a password</h1>
+      <p class="muted">For <strong>${esc(user.email)}</strong>. You'll use it to sign in on your phone and computer.</p>
+      <form id="setForm" class="field" novalidate>
+        <label for="newpw">New password</label>
+        <input id="newpw" type="password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" required>
+        <p class="error hidden" id="err"></p>
+        <button class="btn primary block" style="margin-top:12px" id="go">Save password</button>
+      </form>
+      <button class="btn link" id="cancel">Not now</button>
+    </div>`;
+    const $ = id => document.getElementById(id);
+    $("newpw").focus();
+    $("cancel").onclick = () => { state.recovering = false; loadAccount(user); };
+    $("setForm").onsubmit = async ev => {
+      ev.preventDefault();
+      const password = $("newpw").value;
+      const show = msg => { $("err").textContent = msg; $("err").classList.remove("hidden"); };
+      if (password.length < 8) return show("Use at least 8 characters.");
+      $("go").disabled = true;
+      const { error } = await sb.auth.updateUser({ password });
+      $("go").disabled = false;
+      if (error) return show(/different from the old/i.test(error.message) ? "That's your current password. Pick a new one." : friendly(error));
+      state.recovering = false;
+      toast("Password saved. Use it to sign in from now on.");
+      loadAccount(user);
+    };
+  }
+
+  function renderCodeRequest(errorMsg = "") {
     $app.className = "no-tabs";
     $app.innerHTML = `<div class="signin">
       <img class="brand" src="icons/icon-192.png" alt="">
       <div class="kicker">${esc(APP_NAME)}</div>
-      <h1>Your teams, every morning</h1>
-      <p class="muted">Scores, today's games, tickets and calendar invites, plus a daily email with just the teams you follow.</p>
+      <h1>Sign in with a code</h1>
       <form id="emailForm" class="field" novalidate>
         <label for="email">Email</label>
         <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com" value="${esc(state.pendingEmail)}" required>
         <p class="error ${errorMsg ? "" : "hidden"}" id="err">${esc(errorMsg)}</p>
         <button class="btn primary block" style="margin-top:12px" id="send">Email me a sign-in code</button>
-        <p class="hint">New here? The same code signs you up. No password needed.</p>
       </form>
-      ${installHint()}
+      <button class="btn link" id="back">Sign in with a password instead</button>
     </div>`;
+    document.getElementById("back").onclick = () => renderSignIn();
     const form = document.getElementById("emailForm");
     form.onsubmit = async ev => {
       ev.preventDefault();
@@ -310,8 +426,7 @@
       });
       if (error) {
         btn.disabled = false; btn.textContent = "Email me a sign-in code";
-        err.textContent = /rate|seconds|limit/i.test(error.message)
-          ? "Too many tries. Wait a minute, then try again." : error.message;
+        err.textContent = friendly(error);
         err.classList.remove("hidden");
         return;
       }
@@ -333,11 +448,12 @@
         <button class="btn primary block" style="margin-top:12px" id="verify">Sign in</button>
       </form>
       <button class="btn link" id="back">Use a different email</button>
+      <p class="hint">Got a link instead of a code? Tap "Use a different email", then "Sign in with a password instead" and "Forgot password?" to set a password.</p>
     </div>`;
     const input = document.getElementById("code");
     input.focus();
     input.oninput = () => document.getElementById("err").classList.add("hidden");
-    document.getElementById("back").onclick = () => renderSignIn();
+    document.getElementById("back").onclick = () => renderCodeRequest();
     document.getElementById("codeForm").onsubmit = async ev => {
       ev.preventDefault();
       const token = input.value.replace(/\D/g, "");
@@ -1212,6 +1328,7 @@
       <h2>Account</h2>
       <p class="small muted">Signed in as ${esc(state.user.email)}</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn" id="setpw">Set or change password</button>
         <button class="btn" id="signout">Sign out</button>
         ${first ? "" : `<button class="btn danger" id="remove">Delete my settings</button>`}
       </div>
@@ -1240,6 +1357,7 @@
     loadTeams(d.leagues);
 
     view.querySelector("#save").onclick = save;
+    view.querySelector("#setpw").onclick = () => renderSetPassword(state.user);
     view.querySelector("#signout").onclick = async () => { await phoneOff(true); await sb.auth.signOut(); };
     const rm = view.querySelector("#remove");
     if (rm) rm.onclick = removeMe;
