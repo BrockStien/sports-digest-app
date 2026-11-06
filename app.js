@@ -84,6 +84,9 @@
     newsMine: null,    // null = use the person's "only news about my teams" setting
     sched: { view: "schedule", teams: {}, standings: {}, showAll: {}, full: {}, loading: false },
     chat: { ok: null, groups: null, groupId: null, thread: null, threadTitle: "", members: [], channel: null, poll: null, showSettings: false },
+    isAdmin: false,    // in the app_admins table (the database re-checks this on every admin request)
+    wantAdmin: false,  // opened from a watchdog notification: show the Admin page once we know
+    admin: { view: "status", data: null, at: 0, loading: false, err: "", filter: "all", q: "" },
   };
 
   // ---------------------------------------------------------------- theme
@@ -114,6 +117,7 @@
     chat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/></svg>',
     news: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>',
     sched: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>',
   };
 
@@ -346,7 +350,7 @@
     if (linkErr) history.replaceState(null, "", location.pathname + location.search);
     sb.auth.onAuthStateChange((event, session) => {
       if (event === "PASSWORD_RECOVERY") { state.recovering = true; if (session) renderSetPassword(session.user); return; }
-      if (event === "SIGNED_OUT") { stopLive(); state.user = null; state.sub = null; state.chat = { ok: null, groups: null, groupId: null, thread: null, threadTitle: "", members: [], channel: null, poll: null, showSettings: false }; renderSignIn(); }
+      if (event === "SIGNED_OUT") { stopLive(); state.user = null; state.sub = null; state.isAdmin = false; state.admin = { view: "status", data: null, at: 0, loading: false, err: "", filter: "all", q: "" }; state.chat = { ok: null, groups: null, groupId: null, thread: null, threadTitle: "", members: [], channel: null, poll: null, showSettings: false }; renderSignIn(); }
       if (event === "SIGNED_IN" && session && (!state.user || state.user.id !== session.user.id)) loadAccount(session.user);
     });
     const pj = (location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/) || [])[1];
@@ -373,10 +377,12 @@
     if (data) syncPhone();          // keep this phone's notification sign-up current
     const joinCode = (location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/) || [])[1] || store.get("pendingJoin");
     const chatLink = location.hash.match(/^#chat\/([0-9a-f-]{36})(?:\/([a-z0-9]{2,8}:\d+|general))?$/);
+    if (location.hash === "#admin") state.wantAdmin = true;
     state.tab = data ? (location.hash === "#games" ? "today" : (store.get("tab") || "today")) : "teams";
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     if (data) loadGroups().then(() => { if (state.tab === "today" && state.days[state.day]) paintToday(); paintChatBadge(); });
     renderApp();
+    checkAdmin();
     if (data && joinCode) handleJoin(joinCode.toLowerCase());
     else if (joinCode) store.set("pendingJoin", joinCode);          // finish signing up first, then join
     else if (data && chatLink) openGroup(chatLink[1], chatLink[2] || null);
@@ -522,7 +528,7 @@
   function renderApp() {
     $app.className = "";
     const first = !state.sub;
-    if (!["today", "sched", "news", "chat", "teams"].includes(state.tab) || (state.tab === "chat" && state.chat.ok === false)) state.tab = "today";
+    if (!["today", "sched", "news", "chat", "teams", "admin"].includes(state.tab) || (state.tab === "chat" && state.chat.ok === false) || (state.tab === "admin" && (!state.isAdmin || first))) state.tab = "today";
     const tab = (key, icon, label) =>
       `<button data-tab="${key}" ${state.tab === key ? 'aria-current="page"' : ""}>${icon}${label}</button>`;
     $app.innerHTML = `
@@ -541,8 +547,215 @@
     else if (state.tab === "news") renderNews();
     else if (state.tab === "sched") renderSched();
     else if (state.tab === "chat") renderChat();
+    else if (state.tab === "admin") renderAdmin();
     else renderToday();
     paintChatBadge();
+  }
+
+
+  // ------------------------------------------------------------------ admin
+  // Only for accounts in the app_admins table. Hiding the button is just tidiness: the database
+  // itself refuses admin_overview() to everyone else, so nobody else can read this information.
+  async function checkAdmin() {
+    if (!state.sub) return;
+    try { const { data } = await sb.rpc("is_admin"); state.isAdmin = data === true; } catch { state.isAdmin = false; }
+    const slot = document.getElementById("adminSlot");
+    if (slot) slot.innerHTML = adminLink();
+    if (state.wantAdmin) { state.wantAdmin = false; if (state.isAdmin) openAdmin(); }
+  }
+  const adminLink = () => state.isAdmin
+    ? `<button class="btn block admin-link" type="button" data-open-admin>${ICON.shield}Admin: status, error log &amp; users</button>` : "";
+  function openAdmin(view) {
+    if (view) state.admin.view = view;
+    state.tab = "admin"; renderApp(); window.scrollTo(0, 0);
+  }
+  $app.addEventListener("click", e => {
+    const b = e.target.closest("[data-open-admin]");
+    if (b) { e.preventDefault(); openAdmin(b.dataset.openAdmin || null); }
+  });
+
+  const CHECK_INFO = {
+    watcher: ["Game alerts", "The every-minute job that sends score and game notifications"],
+    espn: ["ESPN scores", "Where all scores, schedules and news come from"],
+    teams: ["Team lists", "The team picker in My Teams"],
+    site: ["App website", "This app on GitHub Pages"],
+    email: ["Daily email", "The morning email from GitHub"],
+  };
+  const SOURCE_NAME = { watchdog: "Watchdog", watcher: "Game alerts", email: "Daily email" };
+  const LEVEL_NAME = { error: "Problem", warn: "Warning", ok: "OK", info: "Info" };
+  const when = d => d ? new Date(d).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
+  const isProblem = l => l.level === "error" || l.level === "warn";
+
+  async function loadAdmin() {
+    const a = state.admin;
+    if (a.loading) return;
+    a.loading = true; a.err = "";
+    const r = document.getElementById("refresh"); if (r) r.classList.add("spin");
+    try {
+      const { data, error } = await sb.rpc("admin_overview", { log_limit: 500 });
+      if (error) throw error;
+      a.data = data; a.at = Date.now();
+    } catch (e) {
+      a.err = /not allowed|permission/i.test(e.message || "") ? "This account isn't an admin." : (e.message || "Couldn't load.");
+    }
+    a.loading = false;
+    if (state.tab === "admin") paintAdmin();
+  }
+
+  function renderAdmin() {
+    const a = state.admin;
+    document.getElementById("view").innerHTML = `
+      <header class="top">
+        <div><div class="kicker">Only you can see this</div><h1>Admin</h1></div>
+        <button class="icon-btn" id="refresh" aria-label="Refresh">${ICON.refresh}</button>
+      </header>
+      <button class="btn link back" type="button" id="admBack">‹ My Teams</button>
+      <div class="seg wide" role="group" aria-label="Admin section">
+        ${[["status", "Status"], ["log", "Error log"], ["users", "Users"]].map(([k, l]) =>
+          `<button data-av="${k}" aria-pressed="${a.view === k}">${l}</button>`).join("")}
+      </div>
+      <div id="adm"><div class="empty">Loading…</div></div>`;
+    document.querySelectorAll("[data-av]").forEach(b => b.onclick = () => { a.view = b.dataset.av; renderAdmin(); });
+    document.getElementById("refresh").onclick = loadAdmin;
+    document.getElementById("admBack").onclick = () => { state.tab = "teams"; store.set("tab", "teams"); renderApp(); window.scrollTo(0, 0); };
+    if (a.data) paintAdmin();
+    if (!a.data || Date.now() - a.at > 60e3) loadAdmin();
+  }
+
+  function paintAdmin() {
+    const a = state.admin, box = document.getElementById("adm");
+    if (!box) return;
+    const r = document.getElementById("refresh"); if (r) r.classList.toggle("spin", a.loading);
+    if (!a.data) { box.innerHTML = `<div class="empty">${a.err ? esc(a.err) : "Loading…"}</div>`; return; }
+    const err = a.err ? `<p class="notice">Couldn't refresh: ${esc(a.err)}</p>` : "";
+    box.innerHTML = err + (a.view === "log" ? adminLog() : a.view === "users" ? adminUsers() : adminStatus());
+    if (a.view === "log") {
+      box.querySelectorAll("[data-lf]").forEach(b => b.onclick = () => { a.filter = b.dataset.lf; paintAdmin(); });
+      box.querySelector("#admCopy").onclick = copyReport;
+      box.querySelector("#admCsv").onclick = downloadCsv;
+    }
+    if (a.view === "users") {
+      const q = box.querySelector("#admQ");
+      q.oninput = () => { a.q = q.value; paintUsers(); };
+      paintUsers();
+    }
+  }
+
+  function adminStatus() {
+    const d = state.admin.data, now = Date.now();
+    const checks = Object.keys(CHECK_INFO).map(k => {
+      const c = (d.checks || []).find(x => x.key === k);
+      return { key: k, at: c && c.at, st: (c && c.state) || null };
+    });
+    const bad = checks.filter(c => c.st && c.st.fails > 0);
+    const day = (d.log || []).filter(l => now - Date.parse(l.at) < 864e5);
+    const users = d.users || [];
+    const lastRun = checks.map(c => Date.parse(c.at || 0)).reduce((m, x) => Math.max(m, x), 0);
+    return `
+      <div class="adm-banner ${bad.length ? "bad" : "good"}">
+        <b>${bad.length ? `${bad.length} thing${bad.length > 1 ? "s" : ""} not working` : "Everything is working"}</b>
+        <span class="small">Watchdog last checked ${lastRun ? ago(lastRun) : "—"}${lastRun && now - lastRun > 25 * 60e3 ? " — that's late; the watchdog itself may be stuck." : ""}</span>
+      </div>
+      <div class="card">${checks.map(c => {
+        const [name, what] = CHECK_INFO[c.key];
+        const failing = c.st && c.st.fails > 0;
+        return `<div class="adm-check">
+          <span class="dot ${!c.st ? "info" : failing ? "error" : "ok"}" aria-hidden="true"></span>
+          <div class="txt"><div><b>${esc(name)}</b> <span class="small muted">${!c.st ? "not checked yet" : failing ? `failing since ${when(c.st.since)}` : "working"}</span></div>
+            <div class="small muted">${failing ? esc(c.st.detail || "") : esc(what)}</div></div>
+        </div>`;
+      }).join("")}</div>
+      <div class="adm-stats">
+        <div><b>${users.length}</b><span>accounts</span></div>
+        <div><b>${users.filter(u => u.email_on).length}</b><span>get the email</span></div>
+        <div><b>${users.reduce((n, u) => n + (+u.devices || 0), 0)}</b><span>phones / browsers with alerts</span></div>
+        <div><b>${day.filter(isProblem).length}</b><span>problems in 24h</span></div>
+      </div>
+      <h2>Latest log entries</h2>
+      ${logRows((d.log || []).slice(0, 5)) || `<div class="empty">Nothing logged yet.</div>`}
+      <button class="btn block" type="button" data-open-admin="log">See the full error log</button>`;
+  }
+
+  const LOG_FILTERS = [["all", "All"], ["problems", "Problems"], ["email", "Daily email"], ["watcher", "Game alerts"], ["watchdog", "Watchdog"]];
+  function filteredLog() {
+    const f = state.admin.filter, log = state.admin.data.log || [];
+    return f === "all" ? log : f === "problems" ? log.filter(isProblem) : log.filter(l => l.source === f);
+  }
+  function logRows(rows) {
+    return rows.length ? `<div class="card adm-log">${rows.map(l => `
+      <details class="adm-row">
+        <summary><span class="dot ${esc(l.level)}" aria-hidden="true"></span>
+          <span class="txt"><span class="t">${esc(l.title)}</span>
+          <span class="small muted">${when(l.at)} · ${esc(SOURCE_NAME[l.source] || l.source)} · ${esc(LEVEL_NAME[l.level] || l.level)}</span></span></summary>
+        ${l.detail ? `<pre>${esc(l.detail)}</pre>` : `<p class="small muted">No extra details.</p>`}
+      </details>`).join("")}</div>` : "";
+  }
+  function adminLog() {
+    const rows = filteredLog();
+    return `
+      <div class="chips adm-filters">${LOG_FILTERS.map(([k, l]) =>
+        `<button type="button" class="fchip" data-lf="${k}" aria-pressed="${state.admin.filter === k}">${l}</button>`).join("")}</div>
+      <div class="adm-actions">
+        <button class="btn" type="button" id="admCopy">Copy report</button>
+        <button class="btn" type="button" id="admCsv">Download CSV</button>
+      </div>
+      <p class="small muted">${rows.length} entr${rows.length === 1 ? "y" : "ies"}. Tap one for details. Kept for 90 days.</p>
+      ${logRows(rows) || `<div class="empty">Nothing here${state.admin.filter === "problems" ? " — no problems logged" : ""}.</div>`}`;
+  }
+  function reportText() {
+    const rows = filteredLog();
+    const head = `Sports Digest error log (${LOG_FILTERS.find(f => f[0] === state.admin.filter)[1]}), ${rows.length} entries, made ${new Date().toLocaleString()}`;
+    return [head, "", ...rows.map(l => `${new Date(l.at).toLocaleString()}  [${(LEVEL_NAME[l.level] || l.level).toUpperCase()}]  ${SOURCE_NAME[l.source] || l.source}: ${l.title}${l.detail ? "\n    " + l.detail.replace(/\n/g, "\n    ") : ""}`)].join("\n");
+  }
+  async function copyReport() {
+    const text = reportText();
+    try { await navigator.clipboard.writeText(text); toast("Report copied"); }
+    catch {
+      const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand("copy"); toast("Report copied"); } catch { toast("Couldn't copy"); }
+      t.remove();
+    }
+  }
+  function downloadCsv() {
+    const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const csv = ["time,source,level,title,detail", ...filteredLog().map(l => [l.at, l.source, l.level, l.title, l.detail].map(q).join(","))].join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const link = Object.assign(document.createElement("a"), { href: url, download: `sports-digest-log-${new Date().toISOString().slice(0, 10)}.csv` });
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  function adminUsers() {
+    return `<input id="admQ" type="search" placeholder="🔍 Search by email, name or team" value="${esc(state.admin.q)}" autocomplete="off">
+      <div id="admUsers"></div>`;
+  }
+  function paintUsers() {
+    const el = document.getElementById("admUsers");
+    if (!el) return;
+    const q = state.admin.q.trim().toLowerCase();
+    const all = state.admin.data.users || [];
+    const list = q ? all.filter(u => [u.email, u.name, ...(u.favorite_teams || [])].some(x => String(x || "").toLowerCase().includes(q))) : all;
+    const lname = k => (LEAGUES.find(l => l.key === k) || { name: k }).name;
+    el.innerHTML = `<p class="small muted">${list.length} of ${all.length} account${all.length === 1 ? "" : "s"}, newest first.</p>` + (list.map(u => {
+      const favs = u.favorite_teams || [], setUp = u.leagues != null;
+      return `<div class="card adm-user">
+        <div class="au-top"><b>${esc(u.name || u.email)}</b>
+          ${u.admin ? `<span class="atag good">admin</span>` : ""}
+          ${!u.confirmed ? `<span class="atag warn">email not confirmed</span>` : ""}
+          ${!setUp ? `<span class="atag">hasn't finished setup</span>` : ""}</div>
+        ${u.name ? `<div class="small muted">${esc(u.email)}</div>` : ""}
+        <div class="au-meta small">
+          <span>Joined ${when(u.created_at)}</span>
+          <span>Last sign-in ${u.last_sign_in_at ? ago(Date.parse(u.last_sign_in_at)) : "never"}</span>
+          <span>📧 ${!setUp ? "—" : u.email_on ? "Daily email on" : "Daily email off"}</span>
+          <span>🔔 ${+u.devices || 0} device${+u.devices === 1 ? "" : "s"}${u.last_push ? `, last alert ${ago(Date.parse(u.last_push))}` : ""}</span>
+          <span>💬 ${+u.groups || 0} chat group${+u.groups === 1 ? "" : "s"}</span>
+        </div>
+        ${setUp ? `<details class="au-more"><summary>${favs.length} favorite${favs.length === 1 ? "" : "s"} · ${(u.leagues || []).length} league${(u.leagues || []).length === 1 ? "" : "s"}</summary>
+          <p class="small"><b>Favorites:</b> ${favs.length ? favs.map(esc).join(", ") : "none"}</p>
+          <p class="small"><b>Leagues:</b> ${(u.leagues || []).map(k => esc(lname(k))).join(", ") || "none"}</p></details>` : ""}
+      </div>`;
+    }).join("") || `<div class="empty">No one matches “${esc(q)}”.</div>`);
   }
 
   // ------------------------------------------- games: yesterday / today / tomorrow
@@ -1692,6 +1905,7 @@
       <p class="hint">System matches your phone's light or dark setting.</p>
 
       <h2>Account</h2>
+      <div id="adminSlot">${first ? "" : adminLink()}</div>
       <p class="small muted">Signed in as ${esc(state.user.email)}</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn" id="setpw">Set or change password</button>
@@ -2069,6 +2283,11 @@
       history.replaceState(null, "", location.pathname + location.search);
       if (!state.sub) { if (j) store.set("pendingJoin", j[1]); return; }
       if (j) handleJoin(j[1].toLowerCase()); else openGroup(c[1], c[2] || null);
+      return;
+    }
+    if (location.hash === "#admin") {
+      history.replaceState(null, "", location.pathname + location.search);
+      if (state.sub) { state.wantAdmin = true; checkAdmin(); }
       return;
     }
     if (location.hash !== "#games") return;
