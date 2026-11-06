@@ -251,3 +251,8 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .stand .logo { width: 18px; height: 18px; vertical-align: -4px; margin-right: 6px; }
 .stand tr.mine td { background: var(--fav); font-weight: 600; }
 .card-head .btn.link.small { font-size: 12px; text-transform: none; letter-spacing: 0; padding: 0; }
+
+/* "No favorites yet" prompt */
+.addfavs { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: var(--fav); border: 1px solid var(--rule); border-radius: var(--radius); padding: 12px 14px; margin: 0 0 12px; font-size: 14px; }
+.addfavs span { flex: 1 1 180px; }
+.addfavs .btn { flex: 0 0 auto; }

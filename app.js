@@ -468,6 +468,16 @@
   }
 
   // -------------------------------------------------------------- app shell
+  // "No favorites yet" prompt with a button that jumps to the team picker in My Teams.
+  const addFavsBox = (msg = "You haven't picked any favorite teams yet.") =>
+    `<div class="addfavs"><span>${msg}</span><button type="button" class="btn primary" data-addfavs>★ Add favorite teams</button></div>`;
+  function goAddFavs() {
+    state.tab = "teams"; store.set("tab", "teams"); renderApp();
+    const box = document.getElementById("teamSearch");
+    if (box) { box.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => box.focus({ preventScroll: true }), 350); }
+  }
+  $app.addEventListener("click", e => { if (e.target.closest("[data-addfavs]")) { e.preventDefault(); goAddFavs(); } });
+
   function renderApp() {
     $app.className = "";
     const first = !state.sub;
@@ -544,6 +554,7 @@
         <span class="small muted" id="updated"></span>
       </div>
       ${s.active ? "" : `<p class="install">⏸ Your daily email is off. Everything is still here in the app.</p>`}
+      ${hasFavs ? "" : addFavsBox("Pick your favorite teams to see their games first, with tickets and alerts.")}
       <div id="games"><div class="empty">Loading games…</div></div>`;
     document.getElementById("refresh").onclick = () => loadDay(state.day);
     document.querySelectorAll("[data-day]").forEach(b => b.onclick = () => {
@@ -672,6 +683,7 @@
         </div>
         <span class="small muted" id="updated"></span>
       </div>
+      ${hasFavs ? "" : addFavsBox("Pick your favorite teams to get news about them.")}
       <div id="news"><div class="empty">Loading news…</div></div>`;
     document.getElementById("refresh").onclick = loadNews;
     document.querySelectorAll("[data-n]").forEach(b => b.onclick = () => { state.newsMine = b.dataset.n === "mine"; renderNews(); });
@@ -859,8 +871,9 @@
     if (sc.view === "standings") return paintStandings(box);
     if (!sc.mine) { box.innerHTML = `<div class="empty">Loading your teams…</div>`; return; }
     if (!sc.mine.length) {
-      box.innerHTML = `<div class="empty">Add favorite teams in <strong>My Teams</strong> to see their schedules and tickets here.<br>
-        <span class="small">Golf, racing and UFC events show on the Games tab.</span></div>`;
+      box.innerHTML = addFavsBox(state.sub.favorite_teams.length
+          ? "None of your favorites are teams with a schedule here (golf, racing and UFC events are on the Games tab)."
+          : "Pick your favorite teams to see their upcoming games and tickets here.");
       return;
     }
     const day = d => new Intl.DateTimeFormat("en-US", { timeZone: s.timezone, weekday: "short", month: "short", day: "numeric" }).format(d);
@@ -916,15 +929,16 @@
     const mineIds = new Set((sc.mine || []).map(t => `${t.league}:${t.id}`));
     const isMine = (k, r) => mineIds.has(`${k}:${r.id}`) || [r.name, r.short, r.abbr, r.name.split(" ").pop()].some(n => n && favs.has(n.toLowerCase()));
     const leagues = s.leagues.filter(k => STAND_URLS[k]);
+    const showAll = k => sc.showAll[k] || !s.favorite_teams.length;   // no favorites: show whole leagues
     if (!leagues.length) { box.innerHTML = `<div class="empty">Standings aren't available for your leagues.</div>`; return; }
     box.innerHTML = leagues.map(k => {
       const data = sc.standings[k];
-      const head = `<div class="card-head"><span>${esc(LEAGUE[k].name)}</span>${data && data.groups.length ? `<button class="btn link small" data-sall="${k}">${sc.showAll[k] ? "Just my teams" : "Whole league"}</button>` : ""}</div>`;
+      const head = `<div class="card-head"><span>${esc(LEAGUE[k].name)}</span>${data && data.groups.length && s.favorite_teams.length ? `<button class="btn link small" data-sall="${k}">${showAll(k) ? "Just my teams" : "Whole league"}</button>` : ""}</div>`;
       if (!data) return `<section class="card">${head}<div class="row muted">Loading…</div></section>`;
       if (data.failed || !data.groups.length) return `<section class="card">${head}<div class="row muted">No standings right now (it may be the off-season).</div></section>`;
       const race = LEAGUE[k].kind === "race";
       let groups = data.groups;
-      if (!sc.showAll[k]) {
+      if (!showAll(k)) {
         const withMine = groups.filter(g => g.rows.some(r => isMine(k, r)));
         groups = withMine.length ? withMine : race ? groups : [];
       }
@@ -932,7 +946,7 @@
       const cols = STAND_COLS[k];
       return `<section class="card">${head}${groups.map(g => {
         let rows = g.rows;
-        if (race && !sc.showAll[k]) rows = rows.filter((r, i) => i < 10 || isMine(k, r));   // top 10 plus your drivers
+        if (race && !showAll(k)) rows = rows.filter((r, i) => i < 10 || isMine(k, r));   // top 10 plus your drivers
         return `<div class="stand-group">${groups.length > 1 || !race ? `<div class="stand-name">${esc(g.name)}</div>` : ""}
           <table class="stand"><thead><tr><th class="tm">${race ? "Driver" : "Team"}</th>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead>
           <tbody>${rows.map((r, i) => `<tr class="${isMine(k, r) ? "mine" : ""}">
@@ -940,6 +954,7 @@
             ${cols.map(c => `<td>${esc(c[1] === "rec" ? r.rec : ((r.st[c[1]] || {}).d ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
       }).join("")}</section>`;
     }).join("");
+    if (!s.favorite_teams.length) box.insertAdjacentHTML("afterbegin", addFavsBox("Pick your favorite teams to highlight them in the standings."));
     box.querySelectorAll("[data-sall]").forEach(b => b.onclick = () => { sc.showAll[b.dataset.sall] = !sc.showAll[b.dataset.sall]; paintSched(); });
   }
 
