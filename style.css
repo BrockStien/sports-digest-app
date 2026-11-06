@@ -274,3 +274,6 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .addfavs { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; background: var(--fav); border: 1px solid var(--rule); border-radius: var(--radius); padding: 12px 14px; margin: 0 0 12px; font-size: 14px; }
 .addfavs span { flex: 1 1 180px; }
 .addfavs .btn { flex: 0 0 auto; }
+
+/* Notification groups */
+.subhead { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 16px 0 6px; }

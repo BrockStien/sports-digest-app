@@ -50,6 +50,9 @@
   const NOTIFY_DEFAULTS = {
     notify_start: true, notify_final: true, notify_scores: false, notify_big_plays: true,
     notify_digest: false, notify_start_minutes: 30, notify_digest_hour: 7,
+    notify_highlights: false, notify_milestones: false, notify_drama: false, notify_periods: false,
+    notify_news: false, notify_schedule: false, notify_standings: false, notify_tickets: false,
+    notify_ticket_price: 75, notify_events: false,
   };
   if (PUSH_ON) Object.assign(DEFAULTS, NOTIFY_DEFAULTS);
   const FIELDS = Object.keys(DEFAULTS);
@@ -1840,6 +1843,7 @@
     if (PUSH_ON) {
       row.notify_start_minutes = clampInt(d.notify_start_minutes, 5, 180, 30);
       row.notify_digest_hour = clampInt(d.notify_digest_hour, 0, 23, 7);
+      row.notify_ticket_price = clampInt(d.notify_ticket_price, 1, 5000, 75);
     }
     const btn = document.getElementById("save");
     const label = btn.textContent;
@@ -1893,19 +1897,41 @@
         <div class="switch-row"><div class="txt"><div>How early</div></div>
           <select id="notify_start_minutes" aria-label="How early">${minutes}</select></div>
         ${sw("notify_scores", "Score updates", "Every score during your teams' games")}
-        ${sw("notify_big_plays", "Big plays and close finishes", "Turnovers, 40+ yard plays, home runs, tight games late")}
+        ${sw("notify_big_plays", "Big plays and close finishes", "Turnovers, 40+ yard plays, home runs, alley-oop dunks, short-handed goals, tight games late")}
         ${sw("notify_final", "Final scores")}
         ${sw("notify_digest", "Morning summary", "Last night's results and today's games")}
         <div class="switch-row"><div class="txt"><div>Summary time</div></div>
           <select id="notify_digest_hour" aria-label="Summary time">${hours}</select></div>
       </div>
+      <h3 class="subhead">During games</h3>
+      <div class="card">
+        ${sw("notify_highlights", "🎬 Highlight clips", "ESPN's video of dunks, goals and big plays, as they're posted")}
+        ${sw("notify_milestones", "🔥 Player milestones", "40-point games, triple-doubles, hat tricks, 300-yard passers, no-hitter watch")}
+        ${sw("notify_drama", "🔄 Comebacks, overtime and upsets", "Your team rallies from way behind, a game goes to OT, a ranked team is in trouble late")}
+        ${sw("notify_periods", "⏸️ Score at each break", "End of each quarter or period, and halftime")}
+      </div>
+      <h3 class="subhead">Team news</h3>
+      <div class="card">
+        ${sw("notify_news", "📰 Injuries and roster moves", "ESPN stories about your teams: injuries, trades, signings")}
+        ${sw("notify_schedule", "🗓️ Schedule changes", "A game time moves, or a game is postponed")}
+        ${sw("notify_standings", "📊 Standings", "Clinched a playoff spot, moved into 1st, new AP Top 25 rank")}
+        ${sw("notify_tickets", "🎟️ Ticket price drop", "When cheap seats show up for your teams' games in the next 45 days")}
+        <div class="switch-row"><div class="txt"><div>Alert me at or below</div><span class="small muted">Cheapest ticket price</span></div>
+          <select id="notify_ticket_price" aria-label="Ticket price">${[25, 40, 50, 75, 100, 150, 200, 300].map(p => `<option value="${p}" ${+d.notify_ticket_price === p ? "selected" : ""}>$${p}</option>`).join("")}</select></div>
+      </div>
+      <h3 class="subhead">Golf, racing and UFC</h3>
+      <div class="card">
+        ${sw("notify_events", "⛳🏁🥊 Your golfers, drivers and fighters", "Takes the lead, pole position, race start and results, your fighter's bout and result")}
+      </div>
       <p class="hint">These go to every phone you've turned notifications on for. Remember to tap Save.</p>`;
   }
 
   function wireNotify(view, d) {
-    ["notify_start", "notify_scores", "notify_big_plays", "notify_final", "notify_digest"].forEach(id =>
+    ["notify_start", "notify_scores", "notify_big_plays", "notify_final", "notify_digest",
+     "notify_highlights", "notify_milestones", "notify_drama", "notify_periods", "notify_news",
+     "notify_schedule", "notify_standings", "notify_tickets", "notify_events"].forEach(id =>
       view.querySelector("#" + id).onchange = e => d[id] = e.target.checked);
-    ["notify_start_minutes", "notify_digest_hour"].forEach(id => view.querySelector("#" + id).onchange = e => d[id] = +e.target.value);
+    ["notify_start_minutes", "notify_digest_hour", "notify_ticket_price"].forEach(id => view.querySelector("#" + id).onchange = e => d[id] = +e.target.value);
     paintPhone();
   }
 
