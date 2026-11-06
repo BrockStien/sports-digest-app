@@ -370,6 +370,7 @@
     state.sub = data;
     state.draft = { ...DEFAULTS, ...(data || {}) };
     if (data && data.theme) applyTheme(data.theme);
+    if (data) syncPhone();          // keep this phone's notification sign-up current
     const joinCode = (location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/) || [])[1] || store.get("pendingJoin");
     const chatLink = location.hash.match(/^#chat\/([0-9a-f-]{36})(?:\/([a-z0-9]{2,8}:\d+|general))?$/);
     state.tab = data ? (location.hash === "#games" ? "today" : (store.get("tab") || "today")) : "teams";
@@ -1983,6 +1984,7 @@
     }
     const sub = Notification.permission === "granted" ? await currentSub() : null;
     if (!box.isConnected) return;   // they moved to another tab while we were checking
+    if (sub) syncPhone(sub);        // make sure the server still has this phone (it can be cleared by signing out elsewhere)
     if (sub) {
       msg(`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
         <div><div style="font-weight:600">🔔 On for this phone</div><span class="small muted">Choose which alerts below.</span></div>
@@ -2023,6 +2025,21 @@
       toast("Couldn't turn on notifications: " + (e.message || e));
     }
     paintPhone();
+  }
+
+  // Re-register this phone with the server if it already has notifications on. The phone can think it's
+  // signed up while the server copy was removed (signing out, or a stale sign-up), so check every time.
+  async function syncPhone(sub) {
+    try {
+      if (!PUSH_ON || !state.user || !pushSupported() || Notification.permission !== "granted") return;
+      sub = sub || await currentSub();
+      if (!sub) return;
+      const j = sub.toJSON();
+      await sb.from("push_subscriptions").upsert({
+        endpoint: j.endpoint, user_id: state.user.id, p256dh: j.keys.p256dh, auth: j.keys.auth,
+        user_agent: navigator.userAgent.slice(0, 200),
+      });
+    } catch { /* not critical */ }
   }
 
   // quiet = during sign-out/delete: don't complain if anything is already gone.
