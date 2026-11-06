@@ -339,3 +339,8 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .atag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; border-radius: 6px; padding: 2px 6px; background: var(--chip); color: var(--muted); }
 .atag.good { color: #1f9d55; }
 .atag.warn { color: #b54708; }
+.au-del { margin-top: 10px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.au-del summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.au-del p { margin: 8px 0; }
+.au-del input { width: 100%; margin-bottom: 8px; }
+.au-del .btn { height: 42px; }

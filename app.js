@@ -581,7 +581,7 @@
     site: ["App website", "This app on GitHub Pages"],
     email: ["Daily email", "The morning email from GitHub"],
   };
-  const SOURCE_NAME = { watchdog: "Watchdog", watcher: "Game alerts", email: "Daily email" };
+  const SOURCE_NAME = { watchdog: "Watchdog", watcher: "Game alerts", email: "Daily email", admin: "Admin action" };
   const LEVEL_NAME = { error: "Problem", warn: "Warning", ok: "OK", info: "Info" };
   const when = d => d ? new Date(d).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—";
   const isProblem = l => l.level === "error" || l.level === "warn";
@@ -676,7 +676,7 @@
       <button class="btn block" type="button" data-open-admin="log">See the full error log</button>`;
   }
 
-  const LOG_FILTERS = [["all", "All"], ["problems", "Problems"], ["email", "Daily email"], ["watcher", "Game alerts"], ["watchdog", "Watchdog"]];
+  const LOG_FILTERS = [["all", "All"], ["problems", "Problems"], ["email", "Daily email"], ["watcher", "Game alerts"], ["watchdog", "Watchdog"], ["admin", "Admin actions"]];
   function filteredLog() {
     const f = state.admin.filter, log = state.admin.data.log || [];
     return f === "all" ? log : f === "problems" ? log.filter(isProblem) : log.filter(l => l.source === f);
@@ -754,8 +754,28 @@
         ${setUp ? `<details class="au-more"><summary>${favs.length} favorite${favs.length === 1 ? "" : "s"} · ${(u.leagues || []).length} league${(u.leagues || []).length === 1 ? "" : "s"}</summary>
           <p class="small"><b>Favorites:</b> ${favs.length ? favs.map(esc).join(", ") : "none"}</p>
           <p class="small"><b>Leagues:</b> ${(u.leagues || []).map(k => esc(lname(k))).join(", ") || "none"}</p></details>` : ""}
+        ${u.admin || u.id === state.user.id ? "" : `<details class="au-del"><summary>Delete account…</summary>
+          <p class="small">This permanently deletes <b>${esc(u.email)}</b>: their sign-in, settings, daily email and phone alerts. It can't be undone.
+          Their chat messages stay (shown as "Former member"), and any chat group they own is handed to another member.</p>
+          <input type="email" data-del-confirm="${esc(u.id)}" placeholder="Type ${esc(u.email)} to confirm" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <button class="btn danger block" type="button" data-del="${esc(u.id)}" data-del-email="${esc(u.email)}" disabled>Delete this account</button></details>`}
       </div>`;
     }).join("") || `<div class="empty">No one matches “${esc(q)}”.</div>`);
+    el.querySelectorAll("[data-del-confirm]").forEach(inp => inp.oninput = () => {
+      const b = el.querySelector(`[data-del="${inp.dataset.delConfirm}"]`);
+      b.disabled = inp.value.trim().toLowerCase() !== b.dataset.delEmail.toLowerCase();
+    });
+    el.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+      const inp = el.querySelector(`[data-del-confirm="${b.dataset.del}"]`);
+      b.disabled = true; b.textContent = "Deleting…";
+      const { data, error } = await sb.rpc("admin_delete_user", { target: b.dataset.del, confirm_email: inp.value });
+      if (error) { toast(error.message || "Couldn't delete"); b.textContent = "Delete this account"; b.disabled = false; return; }
+      const a = state.admin;
+      a.data.users = a.data.users.filter(u => u.id !== b.dataset.del);
+      toast(`Deleted ${data && data.deleted || b.dataset.delEmail}`);
+      paintUsers();
+      a.at = 0; loadAdmin();           // refresh counts and the log entry
+    });
   }
 
   // ------------------------------------------- games: yesterday / today / tomorrow
