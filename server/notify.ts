@@ -683,6 +683,48 @@ async function chatRun(d: Deps, phones: Map<string, any[]>, log: any, outbox: { 
   await d.db.from("notify_meta").upsert({ key: "chat_last_id", value: String(last) });
 }
 
+// ============================================================ pick'em grading
+// Every 5 minutes: picks for games that started 2+ hours ago get checked against ESPN's final.
+// A pick changed after the real start time counts as void (so nobody can pick after kickoff).
+export function gradePick(pick: { team_id: string; updated_at: string }, game: { winner: string | null; tie: boolean; start: number }): "win" | "loss" | "push" | "void" {
+  if (Date.parse(pick.updated_at) > game.start + 60e3) return "void";
+  if (game.tie) return "push";
+  return pick.team_id === game.winner ? "win" : "loss";
+}
+async function pickemRun(d: Deps, log: any) {
+  const { data: rows, error } = await d.db.from("pickem_picks").select("league,event_id")
+    .is("result", null).lt("starts_at", new Date(d.now - 2 * 3600e3).toISOString()).limit(1000);
+  if (error) { if (!/does not exist|schema cache/i.test(error.message)) log.errors.push("pickem: " + error.message); return; }
+  const events = [...new Map(((rows ?? []) as any[]).map(r => [`${r.league}|${r.event_id}`, r])).values()].slice(0, 40);
+  for (const ev of events) {
+    const path = LEAGUES[ev.league]?.path ?? (ev.league === "wnba" ? "basketball/wnba" : "");
+    if (!path) continue;
+    let comp: any;
+    try { comp = (await d.fetchJSON(`${ESPN}/${path}/summary?event=${ev.event_id}`))?.header?.competitions?.[0]; }
+    catch (err) { log.errors.push(`pickem ${ev.league} ${ev.event_id}: ${err}`); continue; }
+    if (!comp) continue;
+    const st = comp.status?.type ?? {};
+    const start = Date.parse(comp.date);
+    let verdict: ((p: any) => string) | null = null;
+    if (st.state === "post" && st.completed !== false && !/POSTPONED|CANCELED|SUSPENDED/.test(st.name ?? "")) {
+      const cs = comp.competitors ?? [];
+      const w = cs.find((c: any) => c.winner);
+      const tie = !w && cs.length === 2 && num(cs[0].score) === num(cs[1].score);
+      const game = { winner: w ? String(w.id ?? w.team?.id) : null, tie, start };
+      verdict = p => gradePick(p, game);
+    } else if (/POSTPONED|CANCELED/.test(st.name ?? "") && d.now - start > 3 * 86400e3) verdict = () => "void";
+    if (!verdict) continue;
+    const { data: picks } = await d.db.from("pickem_picks").select("group_id,user_id,team_id,updated_at")
+      .eq("league", ev.league).eq("event_id", ev.event_id).is("result", null);
+    const winner = (comp.competitors ?? []).find((c: any) => c.winner);
+    for (const p of (picks ?? []) as any[]) {
+      await d.db.from("pickem_picks").update({ result: verdict(p), winner_id: winner ? String(winner.id ?? winner.team?.id) : null, graded_at: new Date(d.now).toISOString() })
+        .eq("group_id", p.group_id).eq("user_id", p.user_id).eq("league", ev.league).eq("event_id", ev.event_id);
+      log.graded = (log.graded ?? 0) + 1;
+    }
+  }
+}
+
 // ============================================================ the run
 type Deps = {
   // deno-lint-ignore no-explicit-any
@@ -716,6 +758,7 @@ export async function run(d: Deps) {
   // Group chat alerts (anyone with a phone registered, whatever their game alerts are).
   const chatOutbox: { userId: string; payload: any; ttl: number }[] = [];
   try { await chatRun(d, phones, log, chatOutbox); } catch (err) { log.errors.push("chat: " + err); }
+  if (new Date(d.now).getUTCMinutes() % 5 === 2) { try { await pickemRun(d, log); } catch (err) { log.errors.push("pickem: " + err); } }
   const sendTo = async (userId: string, payload: any, opts: { TTL: number; urgency: string; topic?: string }, dead: string[]) => {
     for (const ph of phones.get(userId) ?? []) {
       try { await d.send(ph, JSON.stringify(payload), opts); log.sent++; }

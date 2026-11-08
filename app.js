@@ -1134,6 +1134,159 @@
     try { await navigator.clipboard.writeText(url); toast("Invite link copied"); } catch { toast(url); }
   }
 
+
+  // ------------------------------------------------------------ pick'em (inside a chat group)
+  // The owner picks which games count (their teams and/or every game in some leagues). Members pick
+  // a winner for each game until it starts; picks show to everyone at game time. The game watcher
+  // grades them after the final; the leaderboard is this week (Mon–Sun) and the season.
+  const PK_LEAGUES = [["nfl", "Every NFL game"], ["cfb", "College football: games with a Top 25 team"], ["nba", "Every NBA game"], ["nhl", "Every NHL game"], ["mlb", "Every MLB game"], ["cbb", "College basketball: games with a Top 25 team"]];
+  const pkDay = ms => { const d = new Date(ms); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`; };
+  async function pkGames(settings) {
+    const now = Date.now(), until = now + 7 * 864e5, out = new Map();
+    const keep = g => g.start && !g.postponed && g.home.id && g.away.id && +g.start > now - 864e5 && +g.start < until;
+    const jobs = [];
+    for (const t of settings.teams || []) {
+      if (!LEAGUE[t.league]) continue;
+      jobs.push(getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`).then(d => (d.events || []).map(e => parseGame(e, t.league)).filter(keep).forEach(g => out.set(g.key, g))).catch(() => {}));
+    }
+    for (const lg of settings.leagues || []) {
+      if (!LEAGUE[lg]) continue;
+      const q = new URLSearchParams({ ...(LEAGUE[lg].params || {}), dates: `${pkDay(now)}-${pkDay(until)}` });
+      jobs.push(getJSON(`${ESPN}/${LEAGUE[lg].path}/scoreboard?${q}`).then(d => (d.events || []).map(e => parseGame(e, lg)).filter(keep)
+        .filter(g => !(lg === "cfb" || lg === "cbb") || g.home.rank || g.away.rank).forEach(g => out.set(g.key, g))).catch(() => {}));
+    }
+    await Promise.all(jobs);
+    return [...out.values()].sort((a, b) => a.start - b.start);
+  }
+  async function renderPickem(g) {
+    stopLive();
+    const pk = state.pk && state.pk.groupId === g.id ? state.pk : (state.pk = { groupId: g.id, view: "picks", setup: false });
+    document.getElementById("view").innerHTML = `
+      <header class="top"><div><button class="btn link back" id="back">‹ ${esc(g.name)}</button><h1>🏆 Pick'em</h1></div>
+        <button class="icon-btn" id="refresh" aria-label="Refresh">${ICON.refresh}</button></header>
+      <div class="seg wide" role="group" aria-label="Pick'em">
+        ${[["picks", "Make picks"], ["results", "Results"], ["board", "Leaderboard"]].map(([k, l]) => `<button data-pv="${k}" aria-pressed="${pk.view === k}">${l}</button>`).join("")}
+      </div>
+      <div id="pk"><div class="empty">Loading…</div></div>`;
+    document.getElementById("back").onclick = () => openGroup(g.id);
+    document.querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { pk.view = b.dataset.pv; renderPickem(g); });
+    document.getElementById("refresh").onclick = () => { pk.at = 0; loadPickem(g); };
+    paintPickem(g);
+    if (!pk.at || Date.now() - pk.at > 60e3) loadPickem(g);
+  }
+  async function loadPickem(g) {
+    const pk = state.pk;
+    const r = document.getElementById("refresh"); if (r) r.classList.add("spin");
+    const settings = g.pickem || {};
+    const [games, picks, board] = await Promise.all([
+      (settings.teams || []).length || (settings.leagues || []).length ? pkGames(settings) : Promise.resolve([]),
+      sb.from("pickem_picks").select("*").eq("group_id", g.id).gt("starts_at", new Date(Date.now() - 8 * 864e5).toISOString()).then(x => x.data || []),
+      sb.rpc("pickem_board", { g: g.id }).then(x => x.data || []),
+      loadMembers(g.id),
+    ]);
+    Object.assign(pk, { games, picks, board, at: Date.now() });
+    if (state.chat.thread === "pickem" && state.chat.groupId === g.id) paintPickem(g);
+  }
+  function paintPickem(g) {
+    const box = document.getElementById("pk"), pk = state.pk;
+    if (!box) return;
+    const r = document.getElementById("refresh"); if (r) r.classList.remove("spin");
+    const owner = g.my.role === "owner", settings = g.pickem || {};
+    const configured = (settings.teams || []).length || (settings.leagues || []).length;
+    if (pk.setup || (!configured && owner)) return paintPickemSetup(g, box);
+    if (!configured) { box.innerHTML = `<div class="empty">The group owner hasn't picked which games count yet.</div>`; return; }
+    if (!pk.at) { box.innerHTML = `<div class="empty">Loading games…</div>`; return; }
+    const s = state.sub, mine = new Map(), all = new Map();
+    for (const p of pk.picks) { const k = `${p.league}:${p.event_id}`; if (p.user_id === me()) mine.set(k, p); all.set(k, [...(all.get(k) || []), p]); }
+    const day = d => new Intl.DateTimeFormat("en-US", { timeZone: s.timezone, weekday: "short", month: "short", day: "numeric" }).format(d);
+    const ownerLink = owner ? `<p class="small muted center"><button type="button" class="btn link small" id="pkSetup">⚙ Choose which games count</button></p>` : "";
+    if (pk.view === "board") {
+      const rows = pk.board;
+      box.innerHTML = rows.length ? `<section class="card"><table class="stand pk-board"><thead><tr><th class="tm">Player</th><th>Week</th><th>Season</th><th>%</th></tr></thead><tbody>
+        ${rows.map((x, i) => `<tr class="${x.user_id === me() ? "mine" : ""}"><td class="tm"><span class="rk">${i + 1}</span>${i === 0 && x.sw > 0 ? "👑 " : ""}${esc(x.name)}</td>
+          <td>${x.ww}-${x.wl}</td><td><b>${x.sw}-${x.sl}</b>${x.sp ? `-${x.sp}` : ""}</td><td>${x.sw + x.sl ? Math.round(100 * x.sw / (x.sw + x.sl)) + "%" : "—"}</td></tr>`).join("")}
+        </tbody></table></section><p class="small muted center">Week = Monday to Sunday. Season = since August 1. Results update a couple of hours after each final.</p>${ownerLink}` : `<div class="empty">No picks yet.</div>${ownerLink}`;
+    } else if (pk.view === "results") {
+      const done = pk.picks.filter(p => p.starts_at <= new Date().toISOString());
+      const byGame = new Map();
+      for (const p of done) { const k = `${p.league}:${p.event_id}`; if (!byGame.has(k)) byGame.set(k, []); byGame.get(k).push(p); }
+      const name = id => (state.chat.members.find(m => m.user_id === id) || {}).display_name || "Former member";
+      const mark = p => p.result === "win" ? "✅" : p.result === "loss" ? "❌" : p.result === "push" ? "➖" : p.result === "void" ? "🚫" : "⏳";
+      box.innerHTML = byGame.size ? `<section class="card">${[...byGame.values()].sort((a, b) => b[0].starts_at.localeCompare(a[0].starts_at)).map(ps => `
+        <div class="row pk-res"><div class="small muted">${esc(day(new Date(ps[0].starts_at)))} · ${esc(ps[0].matchup)}</div>
+          <div class="pk-who">${ps.map(p => `<span class="pk-chip ${p.result || ""}">${mark(p)} ${esc(name(p.user_id))}: ${esc(p.team_name)}</span>`).join("")}</div></div>`).join("")}</section>
+        <p class="small muted center">✅ right · ❌ wrong · ➖ tie · 🚫 picked after the start · ⏳ waiting for the final</p>` : `<div class="empty">No finished picks in the last week.</div>`;
+    } else {
+      const games = pk.games;
+      box.innerHTML = games.length ? games.map(gm => {
+        const k = gm.key, my = mine.get(k), locked = gm.state !== "pre" || +gm.start <= Date.now();
+        const side = t => {
+          const picked = my && my.team_id === t.id;
+          const won = gm.state === "post" && t.winner;
+          return `<button type="button" class="pk-side ${picked ? "picked" : ""} ${won ? "won" : ""}" ${locked ? "disabled" : ""} data-pick="${esc(k)}" data-team="${esc(t.id)}">
+            ${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ""}<span>${t.rank ? `<span class="small muted">#${t.rank}</span> ` : ""}${esc(t.name)}</span>${gm.state !== "pre" ? `<b>${esc(t.score ?? "")}</b>` : ""}${picked ? `<span class="pk-check">✓</span>` : ""}</button>`;
+        };
+        const others = locked ? (all.get(k) || []).filter(p => p.user_id !== me()) : [];
+        const nameOfM = id => (state.chat.members.find(m => m.user_id === id) || {}).display_name || "Former member";
+        return `<section class="card pk-game">
+          <div class="pk-meta small muted">${esc(LEAGUE[gm.league].name)} · ${esc(day(gm.start))} · ${gm.state === "in" ? `<span class="live">● ${esc(gm.detail)}</span>` : gm.state === "post" ? esc(gm.detail || "Final") : esc(gm.tbd ? "Time TBD" : timeIn(gm.start, s.timezone))}${gm.tv ? " · " + esc(gm.tv) : ""}${locked ? " · 🔒" : ""}</div>
+          <div class="pk-sides">${side(gm.away)}<span class="pk-at">@</span>${side(gm.home)}</div>
+          ${others.length ? `<div class="small muted pk-others">${others.map(p => `${esc(nameOfM(p.user_id))}: ${esc(p.team_name)}`).join(" · ")}</div>` : ""}
+          ${!locked && !my ? `<div class="small muted pk-others">Tap a team to pick it</div>` : ""}
+        </section>`;
+      }).join("") + `<p class="small muted center">Picks lock when each game starts. Everyone's picks show once it begins.</p>${ownerLink}`
+        : `<div class="empty">No games in the next 7 days.</div>${ownerLink}`;
+      box.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => makePick(g, b.dataset.pick, b.dataset.team));
+    }
+    const su = document.getElementById("pkSetup"); if (su) su.onclick = () => { pk.setup = true; paintPickem(g); };
+  }
+  async function makePick(g, key, teamId) {
+    const pk = state.pk, gm = pk.games.find(x => x.key === key);
+    if (!gm) return;
+    const [lg, ev] = key.split(":");
+    const t = gm.home.id === teamId ? gm.home : gm.away;
+    const cur = pk.picks.find(p => p.user_id === me() && `${p.league}:${p.event_id}` === key);
+    const res = cur && cur.team_id === teamId
+      ? await sb.rpc("clear_pick", { g: g.id, lg, ev })
+      : await sb.rpc("make_pick", { g: g.id, lg, ev, team: teamId, team_name: t.name, matchup: `${gm.away.name} @ ${gm.home.name}`, starts: new Date(gm.start).toISOString() });
+    if (res.error) { toast(res.error.message || "Couldn't save your pick"); return; }
+    pk.picks = pk.picks.filter(p => !(p.user_id === me() && `${p.league}:${p.event_id}` === key));
+    if (!(cur && cur.team_id === teamId)) pk.picks.push({ group_id: g.id, user_id: me(), league: lg, event_id: ev, team_id: teamId, team_name: t.name, matchup: `${gm.away.name} @ ${gm.home.name}`, starts_at: new Date(gm.start).toISOString(), result: null });
+    paintPickem(g);
+  }
+  async function paintPickemSetup(g, box) {
+    const pk = state.pk, cur = g.pickem || {};
+    box.innerHTML = `<div class="empty">Loading your teams…</div>`;
+    const mine = await myTeamList().catch(() => []);
+    const curTeams = new Set((cur.teams || []).map(t => `${t.league}:${t.id}`));
+    const teams = [...mine, ...(cur.teams || []).filter(t => !mine.some(m => m.league === t.league && m.id === t.id))];
+    const fresh = !(cur.teams || []).length && !(cur.leagues || []).length;
+    box.innerHTML = `<section class="card pk-setup">
+      <h3>Which games count?</h3>
+      <p class="small muted">Only you (the group owner) can change this. Members pick from the next 7 days of these games.</p>
+      <div class="subhead">Teams</div>
+      ${teams.length ? teams.map(t => `<label class="inv-team"><input type="checkbox" data-pk-team="${esc(t.league)}:${esc(t.id)}" data-name="${esc(t.name)}" ${fresh || curTeams.has(`${t.league}:${t.id}`) ? "checked" : ""}> ${esc(t.name)} <span class="small muted">${esc(LEAGUE[t.league] ? LEAGUE[t.league].name : t.league)}</span></label>`).join("")
+        : `<p class="small muted">Add favorite teams in My Teams to choose them here.</p>`}
+      <div class="subhead">Whole leagues</div>
+      ${PK_LEAGUES.map(([k, l]) => `<label class="inv-team"><input type="checkbox" data-pk-league="${k}" ${(cur.leagues || []).includes(k) ? "checked" : ""}> ${esc(l)}</label>`).join("")}
+      <button type="button" class="btn primary block" id="pkSave">Save</button>
+      ${fresh ? "" : `<button type="button" class="btn link block" id="pkCancel">Cancel</button>`}
+    </section>`;
+    box.querySelector("#pkSave").onclick = async () => {
+      const settings = {
+        teams: [...box.querySelectorAll("[data-pk-team]")].filter(c => c.checked).map(c => { const [league, id] = c.dataset.pkTeam.split(":"); return { league, id, name: c.dataset.name }; }),
+        leagues: [...box.querySelectorAll("[data-pk-league]")].filter(c => c.checked).map(c => c.dataset.pkLeague),
+      };
+      if (!settings.teams.length && !settings.leagues.length) { toast("Pick at least one team or league"); return; }
+      const { error } = await sb.rpc("set_pickem", { g: g.id, settings });
+      if (error) { toast("Couldn't save: " + error.message); return; }
+      g.pickem = settings; pk.setup = false; pk.at = 0;
+      toast("Saved. Pick'em is ready for your group!");
+      renderPickem(g);
+    };
+    const c = box.querySelector("#pkCancel"); if (c) c.onclick = () => { pk.setup = false; paintPickem(g); };
+  }
+
   // ------------------------------------------- games: yesterday / today / tomorrow
   const favSet = () => new Set((state.sub ? state.sub.favorite_teams : []).map(f => f.toLowerCase()));
   const DAYS = [[-1, "Yesterday"], [0, "Today"], [1, "Tomorrow"]];
@@ -1798,7 +1951,7 @@
 
   async function loadGroups() {
     const { data, error } = await sb.from("group_members")
-      .select("group_id, role, chat_notify, last_read_at, display_name, groups(id, name, invite_code, created_by)")
+      .select("group_id, role, chat_notify, last_read_at, display_name, groups(id, name, invite_code, created_by, pickem)")
       .eq("user_id", me());
     if (error) {
       // Chat tables not created yet (chat-setup.sql not run): hide chat quietly.
@@ -1921,14 +2074,17 @@
     if (state.chat.groupId !== id) return;  // moved on while loading
     const g = (state.chat.groups || []).find(x => x.id === id);
     if (!g) { state.chat.groupId = null; toast("You're not in that group anymore."); return renderChat(); }
+    if (state.chat.thread === "pickem") return renderPickem(g);
     if (state.chat.thread) return renderThread(g);
     view.innerHTML = `
       <header class="top"><div><button class="btn link back" id="back">‹ Chat</button><h1>${esc(g.name)}</h1></div>
         <button class="icon-btn" id="gset" aria-label="Group settings">⋯</button></header>
       <div id="gsettings"></div>
+      <button type="button" class="card pk-entry" id="openPickem"><span class="pk-trophy">🏆</span><span><b>Pick'em</b><span class="small muted">Pick winners for this week's games and see who's on top</span></span><span class="chev">›</span></button>
       <div id="threads"><div class="empty">Loading…</div></div>
       <p class="hint">Start a game thread with 💬 Discuss on any game in the Games tab.</p>`;
     document.getElementById("back").onclick = () => { state.chat.groupId = null; renderChat(); };
+    document.getElementById("openPickem").onclick = () => openGroup(id, "pickem");
     document.getElementById("gset").onclick = () => { state.chat.showSettings = !state.chat.showSettings; paintSettings(g); };
     await loadMembers(id);
     paintSettings(g);
