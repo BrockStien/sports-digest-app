@@ -887,6 +887,22 @@
     const https = calUrl();
     if (!https) return "";
     const webcal = https.replace(/^https:/, "webcal:");
+    const on = state.sub.calendar_on !== false;
+    const remove = `<details class="cal-remove"><summary>Remove it from your calendar completely</summary>
+        <p class="small">Turning sync off already clears the games. To also remove the empty “Sports Digest” calendar:</p>
+        <ul class="small">
+          <li><b>iPhone:</b> Settings → Apps → Calendar → Calendar Accounts → Subscribed Calendars → Sports Digest → Delete Account. (On older iPhones: Settings → Calendar → Accounts.)</li>
+          <li><b>Mac:</b> Calendar app → right-click “Sports Digest” in the sidebar → Unsubscribe.</li>
+          <li><b>Google Calendar:</b> on a computer, hover “Sports Digest” under Other calendars → ⋮ → Settings → Unsubscribe.</li>
+          <li><b>Outlook:</b> right-click the calendar → Remove.</li>
+        </ul></details>`;
+    if (!on) return `
+      <h2>Calendar sync</h2>
+      <div class="card calsync">
+        <p class="small"><b>Calendar sync is off.</b> Sports Digest games are being cleared from any calendar you added them to. That happens the next time your calendar checks for updates, usually within a few hours.</p>
+        <button type="button" class="btn block primary" data-cal-on="1">Turn calendar sync back on</button>
+        ${remove}
+      </div>`;
     return `
       <h2>Calendar sync</h2>
       <div class="card calsync">
@@ -894,13 +910,28 @@
         <a class="btn block primary" href="${esc(webcal)}">📅 Add to iPhone / Mac Calendar</a>
         <a class="btn block" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}" target="_blank" rel="noopener">Add to Google Calendar</a>
         <button type="button" class="btn block" data-copy-cal>Copy link (Outlook and others)</button>
-        <p class="small muted">On iPhone, tap the first button, then <b>Subscribe</b> → <b>Add</b>. Your phone checks for changes every few hours. The link is private to you; if you shared it by mistake, <button type="button" class="btn link small" data-reset-cal>get a new link</button> (the old one stops working, so subscribe again).</p>
+        <p class="small muted">On iPhone, tap the first button, then <b>Subscribe</b> → <b>Add</b>. Your phone checks for changes every few hours.</p>
+        <button type="button" class="btn block" data-cal-on="0">Turn off calendar sync</button>
+        <p class="small muted">Turning it off clears the games from your calendar automatically, so there's nothing to delete. The link is private to you; if you shared it by mistake, <button type="button" class="btn link small" data-reset-cal>get a new link</button> (the old one clears itself, then subscribe again with the button above).</p>
+        ${remove}
       </div>`;
   }
   $app.addEventListener("click", async e => {
+    const tog = e.target.closest("[data-cal-on]");
     if (e.target.closest("[data-copy-cal]")) {
       e.preventDefault();
       try { await navigator.clipboard.writeText(calUrl()); toast("Calendar link copied"); } catch { toast(calUrl()); }
+    } else if (tog) {
+      e.preventDefault();
+      const on = tog.dataset.calOn === "1";
+      tog.disabled = true;
+      const { error } = await sb.from("subscribers").update({ calendar_on: on }).eq("id", state.user.id);
+      tog.disabled = false;
+      if (error) { toast("Couldn't change it: " + error.message); return; }
+      state.sub.calendar_on = on; state.draft.calendar_on = on;
+      toast(on ? "Calendar sync is back on. Games return at your calendar's next update." : "Calendar sync is off. The games will clear from your calendar within a few hours.");
+      renderApp();
+      const c = document.querySelector(".calsync"); if (c) c.scrollIntoView({ block: "center" });
     } else if (e.target.closest("[data-reset-cal]")) {
       e.preventDefault();
       const token = crypto.randomUUID();

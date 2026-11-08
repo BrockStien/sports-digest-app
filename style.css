@@ -419,3 +419,7 @@ tr.tap td.tm::after { content: " ›"; }
 .spark span { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-width: 4px; }
 .spark-lab { display: flex; justify-content: space-between; margin-top: 4px; }
 .seg.wide button { min-width: 0; padding-left: 4px; padding-right: 4px; }
+.cal-remove { margin-top: 10px; border-top: 1px solid var(--rule); padding-top: 8px; }
+.cal-remove summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.cal-remove ul { padding-left: 18px; margin: 6px 0 4px; }
+.cal-remove li { margin-bottom: 6px; }
