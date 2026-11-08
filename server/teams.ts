@@ -111,14 +111,38 @@ function schedGames(data: any, teamId: string) {
     };
   });
 }
+// ESPN's "standingSummary" can be wrong (it called the 2nd-seeded Vikings "1st in National Football Conference"),
+// so pro teams get their place from the standings: order within the division, and their conference/league seed.
+const ord = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+const shortConf = (n: string) => n.replace("National Football Conference", "NFC").replace("American Football Conference", "AFC")
+  .replace("American League", "AL").replace("National League", "NL").replace(/^(Eastern|Western) Conference$/, (_m, w) => `${w.slice(0, 4)}ern Conference`);
+export function standingFrom(data: any, league: string, id: string): { standing: string; conference: string } | null {
+  for (const conf of data?.children ?? []) for (const div of conf?.children ?? []) {
+    const entries = div?.standings?.entries ?? [];
+    const i = entries.findIndex((e: any) => String(e?.team?.id) === id);
+    if (i < 0) continue;
+    const stat = (t: string) => (entries[i].stats ?? []).find((x: any) => x.type === t);
+    let divName = String(div.name || "");
+    if (league === "mlb") divName = divName.replace("American League", "AL").replace("National League", "NL");
+    else if (league !== "nfl") divName = divName.replace(/ Division$/, "");
+    const seed = Number(stat("playoffseed")?.value ?? stat("playoffseed")?.displayValue);
+    const confName = shortConf(String(conf.name || ""));
+    return { standing: `${ord(i + 1)} in ${divName}`, conference: Number.isFinite(seed) && seed > 0 ? `#${seed} seed in ${confName}` : "" };
+  }
+  return null;
+}
+const PRO = new Set(["nfl", "nba", "nhl", "mlb"]);
+
 async function teamPage(league: string, id: string) {
   const path = PATHS[league];
-  const [info, roster, sched, news] = await Promise.all([
+  const [info, roster, sched, news, standings] = await Promise.all([
     espn(`${SITE}/${path}/teams/${id}`),
     espn(`${SITE}/${path}/teams/${id}/roster`).catch(() => null),
     espn(`${SITE}/${path}/teams/${id}/schedule`).catch(() => null),
     espn(`${SITE}/${path}/news?limit=50`).catch(() => null),
+    PRO.has(league) ? espn(`https://site.api.espn.com/apis/v2/sports/${path}/standings?level=3`).catch(() => null) : Promise.resolve(null),
   ]);
+  const place = standings ? standingFrom(standings, league, id) : null;
   const t = info?.team ?? {};
   const groups: { name: string; players: any[] }[] = [];
   const injuries: any[] = [];
@@ -144,7 +168,8 @@ async function teamPage(league: string, id: string) {
   return {
     league, team: {
       id: String(t.id ?? id), name: t.displayName ?? "", short: t.shortDisplayName ?? "", abbr: t.abbreviation ?? "", logo: t.logos?.[0]?.href ?? "",
-      color: t.color ? `#${t.color}` : "", record: t.record?.items?.[0]?.summary ?? "", standing: t.standingSummary ?? "",
+      color: t.color ? `#${t.color}` : "", record: t.record?.items?.[0]?.summary ?? "",
+      standing: place?.standing ?? (PRO.has(league) ? "" : t.standingSummary ?? ""), conference: place?.conference ?? "",
       coach: roster?.coach?.[0] ? `${roster.coach[0].firstName ?? ""} ${roster.coach[0].lastName ?? ""}`.trim() : "",
       link: (t.links ?? []).find((l: any) => (l.rel ?? []).includes("clubhouse"))?.href ?? "",
     },

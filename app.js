@@ -1004,7 +1004,7 @@
       <section class="tp-hero" style="--team:${esc(t.color || "var(--accent)")}">
         ${t.logo ? `<img src="${esc(t.logo)}" alt="" class="tp-logo">` : ""}
         <div class="tp-id"><div class="kicker">${esc(LEAGUE[v.league].name)}</div><h1>${esc(t.name)}</h1>
-          <div class="small">${[t.record && `Record ${esc(t.record)}`, esc(t.standing)].filter(Boolean).join(" · ")}</div>
+          <div class="small">${[t.record && `Record ${esc(t.record)}`, esc(t.standing), esc(t.conference || "")].filter(Boolean).join(" · ")}</div>
           ${t.coach ? `<div class="small muted">Coach: ${esc(t.coach)}</div>` : ""}</div>
       </section>
       <div class="tp-actions">
@@ -1609,8 +1609,12 @@
         try {
           const data = await getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`);
           const games = (data.events || []).map(e => parseGame(e, t.league)).filter(g => g.start).sort((a, b) => a.start - b.start);
-          const rec = ((data.team || {}).recordSummary) || "";
-          const standing = ((data.team || {}).standingSummary) || "";
+          let rec = ((data.team || {}).recordSummary) || "", standing = ((data.team || {}).standingSummary) || "";
+          // ESPN's one-line summary can be wrong (e.g. "1st in National Football Conference" for a #2 seed): use the standings.
+          try {
+            const tp = await getJSON(`${FN()}/teams?league=${encodeURIComponent(t.league)}&team=${encodeURIComponent(t.id)}`);
+            if (tp && tp.team) { rec = tp.team.record || rec; standing = [tp.team.standing, tp.team.conference].filter(Boolean).join(" · ") || standing; }
+          } catch { /* keep ESPN's */ }
           sc.teams[key] = { at: Date.now(), games, rec, standing };
         } catch { sc.teams[key] = { at: Date.now(), games: [], failed: true }; }
       }));
