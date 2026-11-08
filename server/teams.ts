@@ -127,7 +127,10 @@ export function standingFrom(data: any, league: string, id: string): { standing:
     else if (league !== "nfl") divName = divName.replace(/ Division$/, "");
     const seed = Number(stat("playoffseed")?.value ?? stat("playoffseed")?.displayValue);
     const confName = shortConf(String(conf.name || ""));
-    return { standing: `${ord(i + 1)} in ${divName}`, conference: Number.isFinite(seed) && seed > 0 ? `#${seed} seed in ${confName}` : "" };
+    // Playoff spots per conference/league: inside them it's a "seed", outside just a place.
+    const spots: Record<string, number> = { nfl: 7, nba: 10, nhl: 8, mlb: 6 };
+    const conference = !Number.isFinite(seed) || seed <= 0 ? "" : seed <= (spots[league] ?? 0) ? `#${seed} seed in ${confName}` : `${ord(seed)} in ${confName}`;
+    return { standing: `${ord(i + 1)} in ${divName}`, conference };
   }
   return null;
 }
