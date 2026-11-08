@@ -1619,7 +1619,13 @@
       await Promise.all(sc.mine.map(async t => {
         const key = `${t.league}:${t.id}`;
         try {
-          const data = await getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`);
+          let data = await getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`);
+          // After the season ESPN shows the playoff schedule, which is empty for teams that missed the playoffs:
+          // fall back to the regular season (for "Last game" and the next-season line).
+          if (!(data.events || []).length && ((data.season || {}).type === 3)) {
+            const reg = await getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule?seasontype=2`).catch(() => null);
+            if (reg && (reg.events || []).length) data = { ...reg, team: data.team || reg.team };
+          }
           const games = (data.events || []).map(e => parseGame(e, t.league)).filter(g => g.start).sort((a, b) => a.start - b.start);
           let rec = ((data.team || {}).recordSummary) || "", standing = ((data.team || {}).standingSummary) || "";
           // ESPN's one-line summary can be wrong (e.g. "1st in National Football Conference" for a #2 seed): use the standings.
@@ -1629,7 +1635,7 @@
           } catch { /* keep ESPN's */ }
           // Season over: when does the next one start (and who's first, once the schedule is out)?
           let opening = null;
-          if (games.length && !games.some(g => g.state !== "post" && !g.postponed)) {
+          if (!games.some(g => g.state !== "post" && !g.postponed)) {
             try {
               const op = await getJSON(`${FN()}/teams?league=${encodeURIComponent(t.league)}&opening=1`);
               if (op && op.start) {
