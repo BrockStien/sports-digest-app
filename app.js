@@ -1139,27 +1139,42 @@
   // The owner picks which games count (their teams and/or every game in some leagues). Members pick
   // a winner for each game until it starts; picks show to everyone at game time. The game watcher
   // grades them after the final; the leaderboard is this week (Mon–Sun) and the season.
-  const PK_LEAGUES = [["nfl", "Every NFL game"], ["cfb", "College football: games with a Top 25 team"], ["nba", "Every NBA game"], ["nhl", "Every NHL game"], ["mlb", "Every MLB game"], ["cbb", "College basketball: games with a Top 25 team"]];
+  const PK_LEAGUES = [["nfl", "Every NFL game, by week"], ["cfb", "College football: Top 25 games, by week"], ["nba", "Every NBA game"], ["nhl", "Every NHL game"], ["mlb", "Every MLB game"], ["cbb", "College basketball: games with a Top 25 team"]];
   const pkDay = ms => { const d = new Date(ms); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`; };
-  async function pkGames(settings) {
-    const now = Date.now(), until = now + 7 * 864e5, out = new Map();
-    const keep = g => g.start && !g.postponed && g.home.id && g.away.id && +g.start > now - 864e5 && +g.start < until;
+  // NFL and college football go by ESPN's week ("Week 10"); other leagues by the next 7 days.
+  const PK_WEEKLY = { nfl: { max: { 1: 4, 2: 18, 3: 5 } }, cfb: { max: { 2: 16, 3: 1 } } };
+  const SEASON_TYPE = { 1: "Preseason", 2: "", 3: "Playoffs" };
+  async function pkGames(settings, sel = {}) {
+    const now = Date.now(), until = now + 7 * 864e5, out = new Map(), weekly = {};
+    const keep = g => g.start && !g.postponed && g.home.id && g.away.id;
+    const soon = g => +g.start > now - 864e5 && +g.start < until;
+    const ranked = (lg, g) => !(lg === "cfb" || lg === "cbb") || g.home.rank || g.away.rank;
     const jobs = [];
+    for (const lg of settings.leagues || []) {
+      if (!LEAGUE[lg] || !PK_WEEKLY[lg]) continue;
+      const pick = sel[lg];
+      const q = new URLSearchParams({ ...(LEAGUE[lg].params || {}), ...(pick ? { week: pick.week, seasontype: pick.type } : {}) });
+      jobs.push(getJSON(`${ESPN}/${LEAGUE[lg].path}/scoreboard?${q}`).then(d => {
+        const wk = (d.week || {}).number || (pick && pick.week) || 1, type = ((d.season || {}).type) || (pick && pick.type) || 2;
+        weekly[lg] = { week: wk, type, games: (d.events || []).map(e => parseGame(e, lg)).filter(keep).filter(g => ranked(lg, g)).sort((a, b) => a.start - b.start) };
+      }).catch(() => { weekly[lg] = { week: pick ? pick.week : 0, type: pick ? pick.type : 2, games: [], failed: true }; }));
+    }
     for (const t of settings.teams || []) {
-      if (!LEAGUE[t.league]) continue;
-      jobs.push(getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`).then(d => (d.events || []).map(e => parseGame(e, t.league)).filter(keep).forEach(g => out.set(g.key, g))).catch(() => {}));
+      if (!LEAGUE[t.league] || (settings.leagues || []).includes(t.league) && PK_WEEKLY[t.league]) continue;   // already in that league's week
+      jobs.push(getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`).then(d => (d.events || []).map(e => parseGame(e, t.league)).filter(keep).filter(soon).forEach(g => out.set(g.key, g))).catch(() => {}));
     }
     // ESPN no longer accepts a date range ("20261108-20261114" gives an error), so ask for each day.
     for (const lg of settings.leagues || []) {
-      if (!LEAGUE[lg]) continue;
+      if (!LEAGUE[lg] || PK_WEEKLY[lg]) continue;
       for (let i = 0; i <= 7; i++) {
         const q = new URLSearchParams({ ...(LEAGUE[lg].params || {}), dates: pkDay(now + i * 864e5) });
-        jobs.push(getJSON(`${ESPN}/${LEAGUE[lg].path}/scoreboard?${q}`).then(d => (d.events || []).map(e => parseGame(e, lg)).filter(keep)
-          .filter(g => !(lg === "cfb" || lg === "cbb") || g.home.rank || g.away.rank).forEach(g => out.set(g.key, g))).catch(() => {}));
+        jobs.push(getJSON(`${ESPN}/${LEAGUE[lg].path}/scoreboard?${q}`).then(d => (d.events || []).map(e => parseGame(e, lg)).filter(keep).filter(soon)
+          .filter(g => ranked(lg, g)).forEach(g => out.set(g.key, g))).catch(() => {}));
       }
     }
     await Promise.all(jobs);
-    return [...out.values()].sort((a, b) => a.start - b.start);
+    for (const w of Object.values(weekly)) for (const g of w.games) out.delete(g.key);
+    return { weekly, games: [...out.values()].sort((a, b) => a.start - b.start) };
   }
   async function renderPickem(g) {
     stopLive();
@@ -1182,12 +1197,12 @@
     const r = document.getElementById("refresh"); if (r) r.classList.add("spin");
     const settings = g.pickem || {};
     const [games, picks, board] = await Promise.all([
-      (settings.teams || []).length || (settings.leagues || []).length ? pkGames(settings) : Promise.resolve([]),
+      (settings.teams || []).length || (settings.leagues || []).length ? pkGames(settings, pk.weekSel || {}) : Promise.resolve({ weekly: {}, games: [] }),
       sb.from("pickem_picks").select("*").eq("group_id", g.id).gt("starts_at", new Date(Date.now() - 8 * 864e5).toISOString()).then(x => x.data || []),
       sb.rpc("pickem_board", { g: g.id }).then(x => x.data || []),
       loadMembers(g.id),
     ]);
-    Object.assign(pk, { games, picks, board, at: Date.now() });
+    Object.assign(pk, { games: games.games, weekly: games.weekly, picks, board, at: Date.now() });
     if (state.chat.thread === "pickem" && state.chat.groupId === g.id) paintPickem(g);
   }
   function paintPickem(g) {
@@ -1220,8 +1235,8 @@
           <div class="pk-who">${ps.map(p => `<span class="pk-chip ${p.result || ""}">${mark(p)} ${esc(name(p.user_id))}: ${esc(p.team_name)}</span>`).join("")}</div></div>`).join("")}</section>
         <p class="small muted center">✅ right · ❌ wrong · ➖ tie · 🚫 picked after the start · ⏳ waiting for the final</p>` : `<div class="empty">No finished picks in the last week.</div>`;
     } else {
-      const games = pk.games;
-      box.innerHTML = games.length ? games.map(gm => {
+      const nameOfM = id => (state.chat.members.find(m => m.user_id === id) || {}).display_name || "Former member";
+      const card = (gm, showDay = true) => {
         const k = gm.key, my = mine.get(k), locked = gm.state !== "pre" || +gm.start <= Date.now();
         const side = t => {
           const picked = my && my.team_id === t.id;
@@ -1230,21 +1245,47 @@
             ${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ""}<span>${t.rank ? `<span class="small muted">#${t.rank}</span> ` : ""}${esc(t.name)}</span>${gm.state !== "pre" ? `<b>${esc(t.score ?? "")}</b>` : ""}${picked ? `<span class="pk-check">✓</span>` : ""}</button>`;
         };
         const others = locked ? (all.get(k) || []).filter(p => p.user_id !== me()) : [];
-        const nameOfM = id => (state.chat.members.find(m => m.user_id === id) || {}).display_name || "Former member";
+        const when = gm.state === "in" ? `<span class="live">● ${esc(gm.detail)}</span>` : gm.state === "post" ? esc(gm.detail || "Final") : esc(gm.tbd ? "Time TBD" : timeIn(gm.start, s.timezone));
         return `<section class="card pk-game">
-          <div class="pk-meta small muted">${esc(LEAGUE[gm.league].name)} · ${esc(day(gm.start))} · ${gm.state === "in" ? `<span class="live">● ${esc(gm.detail)}</span>` : gm.state === "post" ? esc(gm.detail || "Final") : esc(gm.tbd ? "Time TBD" : timeIn(gm.start, s.timezone))}${gm.tv ? " · " + esc(gm.tv) : ""}${locked ? " · 🔒" : ""}</div>
+          <div class="pk-meta small muted">${showDay ? `${esc(LEAGUE[gm.league].name)} · ${esc(day(gm.start))} · ` : ""}${when}${gm.tv ? " · " + esc(gm.tv) : ""}${locked ? " · 🔒" : ""}</div>
           <div class="pk-sides">${side(gm.away)}<span class="pk-at">@</span>${side(gm.home)}</div>
           ${others.length ? `<div class="small muted pk-others">${others.map(p => `${esc(nameOfM(p.user_id))}: ${esc(p.team_name)}`).join(" · ")}</div>` : ""}
           ${!locked && !my ? `<div class="small muted pk-others">Tap a team to pick it</div>` : ""}
         </section>`;
-      }).join("") + `<p class="small muted center">Picks lock when each game starts. Everyone's picks show once it begins.</p>${ownerLink}`
+      };
+      const blocks = [];
+      for (const [lg, w] of Object.entries(pk.weekly || {})) {
+        const max = (PK_WEEKLY[lg].max || {})[w.type] || 18;
+        const label = `${SEASON_TYPE[w.type] ? SEASON_TYPE[w.type] + " · " : ""}Week ${w.week}`;
+        const picked = w.games.filter(gm => mine.has(gm.key)).length, open = w.games.filter(gm => gm.state === "pre" && +gm.start > Date.now()).length;
+        let lastDay = "";
+        const list = w.games.map(gm => {
+          const d = day(gm.start), head = d !== lastDay ? `<div class="pk-day">${esc(d)}</div>` : "";
+          lastDay = d;
+          return head + card(gm, false);
+        }).join("");
+        blocks.push(`<div class="pk-week">
+          <button type="button" class="icon-btn" data-wk="${esc(lg)}" data-dir="-1" ${w.week <= 1 ? "disabled" : ""} aria-label="Previous week">‹</button>
+          <div class="pk-week-t"><div class="kicker">${esc(LEAGUE[lg].name)}${lg === "cfb" ? " · Top 25 games" : ""}</div><b>${esc(label)}</b>
+            <div class="small muted">${w.games.length} game${w.games.length === 1 ? "" : "s"} · you've picked ${picked}${open ? ` · ${open} still open` : ""}</div></div>
+          <button type="button" class="icon-btn" data-wk="${esc(lg)}" data-dir="1" ${w.week >= max ? "disabled" : ""} aria-label="Next week">›</button>
+        </div>${w.failed ? `<div class="empty">Couldn't load this week. Tap ↻ to try again.</div>` : list || `<div class="empty">No games this week.</div>`}`);
+      }
+      if (pk.games.length) blocks.push(`${Object.keys(pk.weekly || {}).length ? `<div class="pk-week"><div class="pk-week-t"><b>Next 7 days</b><div class="small muted">Your other picked teams and leagues</div></div></div>` : ""}${pk.games.map(gm => card(gm)).join("")}`);
+      box.innerHTML = blocks.length ? blocks.join("") + `<p class="small muted center">Picks lock when each game starts. Everyone's picks show once it begins.</p>${ownerLink}`
         : `<div class="empty">No games in the next 7 days.</div>${ownerLink}`;
+      box.querySelectorAll("[data-wk]").forEach(b => b.onclick = () => {
+        const lg = b.dataset.wk, w = pk.weekly[lg];
+        pk.weekSel = { ...(pk.weekSel || {}), [lg]: { week: w.week + +b.dataset.dir, type: w.type } };
+        pk.at = 0; box.querySelectorAll("[data-wk]").forEach(x => x.disabled = true);
+        loadPickem(g);
+      });
       box.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => makePick(g, b.dataset.pick, b.dataset.team));
     }
     const su = document.getElementById("pkSetup"); if (su) su.onclick = () => { pk.setup = true; paintPickem(g); };
   }
   async function makePick(g, key, teamId) {
-    const pk = state.pk, gm = pk.games.find(x => x.key === key);
+    const pk = state.pk, gm = [...pk.games, ...Object.values(pk.weekly || {}).flatMap(w => w.games)].find(x => x.key === key);
     if (!gm) return;
     const [lg, ev] = key.split(":");
     const t = gm.home.id === teamId ? gm.home : gm.away;
