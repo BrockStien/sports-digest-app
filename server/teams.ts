@@ -191,8 +191,9 @@ async function nextSeason(league: string) {
     try {
       const t = await espn(`https://sports.core.api.espn.com/v2/sports/${CORE[league]}/seasons/${year}/types/2`);
       const start = Date.parse(t?.startDate);
-      // Season dates are midnight Pacific; shift back so the calendar date is right.
-      if (Number.isFinite(start) && start > now) return { league, year, start: new Date(start - 8 * 3600e3).toISOString().slice(0, 10) };
+      // Season dates are midnight Pacific time: read the calendar date in that time zone.
+      if (Number.isFinite(start) && start > now)
+        return { league, year, start: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(start)) };
     } catch { /* try the next year */ }
   }
   return { league, year: null, start: null };
