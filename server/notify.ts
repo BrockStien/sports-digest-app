@@ -844,6 +844,9 @@ export async function run(d: Deps) {
   if (minute === 17) await extra("schedule", () => scheduleRun(d, users, outbox, log));
   if (minute === 23 && new Date(d.now).getUTCHours() % 2 === 0) await extra("standings", () => standingsRun(d, users, outbox, log));
 
+  const kinds: Record<string, number> = {};   // alerts per type, for the Admin page
+  if (chatOutbox.length) kinds.chat = chatOutbox.length;
+  for (const { alert } of outbox) kinds[alert.kind] = (kinds[alert.kind] ?? 0) + 1;
   await Promise.all(outbox.map(({ user, alert }) => sendTo(user.id,
     { title: alert.title, body: alert.body, tag: alert.tag, url: alert.url || (d.appUrl ? d.appUrl + "#games" : "/") },
     { TTL: ["start", "score", "close", "period", "drama"].includes(alert.kind) ? 1800 : 6 * 3600,
@@ -860,6 +863,9 @@ export async function run(d: Deps) {
   }
   await removeDead();
   if (copies.length) await seenSet(d, copies);
+  if (Object.keys(kinds).length) {
+    try { await d.db.rpc("bump_notify_stats", { d: localParts("America/Chicago", d.now).date, counts: kinds }); } catch { /* stats are optional */ }
+  }
   // Tidy up old bookkeeping now and then.
   if (new Date(d.now).getUTCMinutes() === 7) {
     await d.db.from("notify_games").delete().lt("updated_at", new Date(d.now - 3 * 24 * 3600e3).toISOString());
