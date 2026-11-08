@@ -1394,7 +1394,10 @@
       state.day = +b.dataset.day; state.showAllCollege = false; renderToday();
     });
     document.querySelectorAll("[data-f]").forEach(b => b.onclick = () => {
-      state.myTeamsOnly = b.dataset.f === "mine"; renderToday();
+      state.myTeamsOnly = b.dataset.f === "mine";
+      // Tapping "My teams" on a day none of them play shows that (instead of switching to all games again).
+      state.forceMine = { ...(state.forceMine || {}), [state.day]: state.myTeamsOnly };
+      renderToday();
     });
     if (state.days[state.day]) paintToday();
     if (isStale(state.day)) loadDay(state.day);
@@ -1420,16 +1423,23 @@
     const favs = favSet();
     updatedLabel(day.at);
 
-    let html = "";
+    // None of your teams play this day: open "All games" automatically (unless you just tapped "My teams").
+    const favCount = day.leagues.reduce((n, r) => n + (r.error ? 0 : r.games.filter(g => isFav(g, favs)).length), 0);
+    const auto = state.myTeamsOnly && favCount === 0 && !(state.forceMine || {})[state.day] && !day.leagues.some(r => r.error);
+    const mineOnly = state.myTeamsOnly && !auto;
+    const fm = document.querySelector('[data-f="mine"]'), fa = document.querySelector('[data-f="all"]');
+    if (fm && fa) { fm.setAttribute("aria-pressed", String(mineOnly)); fa.setAttribute("aria-pressed", String(!mineOnly)); }
+    const whenNone = { "-1": "played yesterday", "0": "play today", "1": "play tomorrow" }[state.day];
+    let html = auto ? `<p class="notice small auto-all">None of your teams ${whenNone}, so here are all the games.</p>` : "";
     let shown = 0;
     let failed = 0;
     for (const r of day.leagues) {
       const lg = LEAGUE[r.league];
       if (r.error) { failed++; continue; }
       let games = r.games.map(g => ({ g, fav: isFav(g, favs) }));
-      if (state.myTeamsOnly) games = games.filter(x => x.fav);
+      if (mineOnly) games = games.filter(x => x.fav);
       let hidden = 0;
-      if (!state.myTeamsOnly && lg.busy && games.length > lg.busy && !state.showAllCollege) {
+      if (!mineOnly && lg.busy && games.length > lg.busy && !state.showAllCollege) {
         const keep = games.filter(x => x.fav || (x.g.home && (x.g.home.rank || x.g.away.rank)));
         hidden = games.length - keep.length;
         games = keep;
@@ -1447,7 +1457,7 @@
     if (!shown) {
       const when = { "-1": "played yesterday", "0": "play today", "1": "play tomorrow" }[state.day];
       const word = { "-1": "yesterday", "0": "today", "1": "tomorrow" }[state.day];
-      html = state.myTeamsOnly
+      html = mineOnly
         ? `<div class="empty">None of your teams ${when}.<br><button class="btn link" data-all>See all games</button></div>`
         : `<div class="empty">No games ${word} in your leagues.</div>`;
     }
@@ -1455,7 +1465,7 @@
     box.innerHTML = html;
     box.querySelectorAll("[data-showall]").forEach(b => b.onclick = () => { state.showAllCollege = true; paintToday(); });
     box.querySelectorAll("[data-discuss]").forEach(b => b.onclick = () => discuss(b.dataset.discuss));
-    box.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { state.myTeamsOnly = false; renderToday(); });
+    box.querySelectorAll("[data-all]").forEach(b => b.onclick = () => { state.forceMine = { ...(state.forceMine || {}), [state.day]: false }; renderToday(); });
   }
 
   // ------------------------------------------------------------------- news
