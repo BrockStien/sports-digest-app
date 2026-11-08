@@ -123,8 +123,15 @@ if (!(globalThis as any).__SD_TEST__) Deno.serve(async (req) => {
   let key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   if (!key) { try { key = Object.values(JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}"))[0] as string ?? ""; } catch { /* none */ } }
   const db = createClient(BASE, key, { auth: { persistSession: false } });
-  const { data: u } = await db.from("subscribers").select("name,leagues,favorite_teams").eq("calendar_token", token).maybeSingle();
-  if (!u) return text("This calendar link was reset or removed. Get the new one in Sports Digest → My Teams.", 404);
+  const { data: u } = await db.from("subscribers").select("name,leagues,favorite_teams,calendar_on").eq("calendar_token", token).maybeSingle();
+  // Turned off, or an old link (new link made, settings or account deleted): send an empty calendar,
+  // so calendars that subscribed clear out the games instead of keeping old ones.
+  const empty = (name: string) => text(ics(name, []), 200, "text/calendar; charset=utf-8");
+  if (!u) {
+    const { data: old } = await db.from("calendar_retired").select("token").eq("token", token).maybeSingle();
+    return old ? empty("Sports Digest (off)") : text("Unknown calendar link. Get yours in Sports Digest → My Teams.", 404);
+  }
+  if (u.calendar_on === false) return empty("Sports Digest (off)");
   const favs = new Set(((u.favorite_teams ?? []) as string[]).map(f => f.toLowerCase()));
   const leagues = ((u.leagues ?? []) as string[]);
   const events: Ev[] = [];
