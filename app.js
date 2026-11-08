@@ -982,6 +982,11 @@
     paintTeamPage();
     loadTeamPage(false);
   }
+  // Team page sections fold open/closed with a tap. Defaults: games and injuries open; news, roster and positions closed.
+  const SEC_DEFAULT = { upcoming: true, recent: true, injuries: true, news: false, roster: false };
+  const secOpen = k => { const m = store.get("teamSecs") || {}; return k in m ? !!m[k] : k.startsWith("pos:") ? false : SEC_DEFAULT[k] !== false; };
+  const sec = (k, title, count, body) => `<details class="card tp-sec" data-sec="${k}" ${secOpen(k) ? "open" : ""}>
+      <summary class="card-head"><span>${esc(title)}</span><span class="small">${count || ""} <span class="chev">▾</span></span></summary>${body}</details>`;
   function paintTeamPage() {
     const box = document.getElementById("teamPage");
     if (!box) return;
@@ -1011,19 +1016,18 @@
         ${fav ? `<span class="small muted">★ One of your teams</span>` : `<button type="button" class="btn" id="tpFav">☆ Add to my teams</button>`}
         ${t.link ? `<a class="btn" href="${esc(t.link)}" target="_blank" rel="noopener">ESPN team page</a>` : ""}
       </div>
-      ${v.pickem ? "" : `<section class="card"><div class="card-head"><span>Upcoming</span></div>
-        ${d.upcoming.length ? d.upcoming.map(gameRow).join("") : `<div class="row muted">No upcoming games scheduled.</div>`}</section>`}
-      <section class="card"><div class="card-head"><span>Recent results</span></div>
-        ${d.recent.length ? d.recent.map(gameRow).join("") : `<div class="row muted">No games yet this season.</div>`}</section>
-      <section class="card"><div class="card-head"><span>Injuries</span><span class="small">${d.injuries.length || ""}</span></div>
-        ${d.injuries.length ? d.injuries.map(p => `<div class="row tp-inj"><span>${esc(p.name)} <span class="small muted">${esc(p.pos)}</span></span><span class="inj ${injClass(p.status)}">${esc(p.status)}</span></div>`).join("")
-          : `<div class="row muted">No injuries reported.</div>`}</section>
-      ${d.news.length ? `<section class="card"><div class="card-head"><span>News</span></div>
-        ${d.news.map(n => `<a class="row tp-news" href="${esc(n.link)}" target="_blank" rel="noopener"><div><strong>${esc(n.headline)}</strong>${n.description ? `<div class="small muted">${esc(n.description.slice(0, 140))}</div>` : ""}</div></a>`).join("")}</section>` : ""}
-      <section class="card"><div class="card-head"><span>Roster</span></div>
-        ${d.roster.length ? d.roster.map((g, i) => `<details class="tp-roster" ${i === 0 ? "open" : ""}><summary>${esc(g.name)} <span class="small muted">${g.players.length}</span></summary>
+      ${v.pickem ? "" : sec("upcoming", "Upcoming", d.upcoming.length, d.upcoming.length ? d.upcoming.map(gameRow).join("") : `<div class="row muted">No upcoming games scheduled.</div>`)}
+      ${sec("recent", "Recent results", d.recent.length, d.recent.length ? d.recent.map(gameRow).join("") : `<div class="row muted">No games yet this season.</div>`)}
+      ${sec("injuries", "Injuries", d.injuries.length, d.injuries.length ? d.injuries.map(p => `<div class="row tp-inj"><span>${esc(p.name)} <span class="small muted">${esc(p.pos)}</span></span><span class="inj ${injClass(p.status)}">${esc(p.status)}</span></div>`).join("")
+          : `<div class="row muted">No injuries reported.</div>`)}
+      ${d.news.length ? sec("news", "News", d.news.length, d.news.map(n => `<a class="row tp-news" href="${esc(n.link)}" target="_blank" rel="noopener"><div><strong>${esc(n.headline)}</strong>${n.description ? `<div class="small muted">${esc(n.description.slice(0, 140))}</div>` : ""}</div></a>`).join("")) : ""}
+      ${sec("roster", "Roster", d.roster.reduce((n, g) => n + g.players.length, 0), d.roster.length ? d.roster.map(g => `<details class="tp-roster" data-sec="pos:${esc(g.name)}" ${secOpen("pos:" + g.name) ? "open" : ""}><summary>${esc(g.name)} <span class="small muted">${g.players.length}</span></summary>
           ${g.players.map(p => `<div class="row tp-player"><span class="num">${esc(p.jersey || "")}</span><span class="nm">${esc(p.name)}</span><span class="small muted">${esc(p.pos)}</span>${p.status ? `<span class="inj ${injClass(p.status)}">${esc(p.status)}</span>` : ""}</div>`).join("")}</details>`).join("")
-          : `<div class="row muted">Roster not available.</div>`}</section>`;
+          : `<div class="row muted">Roster not available.</div>`)}`;
+    // Remember which sections are open or closed (this phone only).
+    box.querySelectorAll("details[data-sec]").forEach(dt => dt.addEventListener("toggle", () => {
+      const m = { ...(store.get("teamSecs") || {}) }; m[dt.dataset.sec] = dt.open; store.set("teamSecs", m);
+    }));
     const fb = document.getElementById("tpFav");
     if (fb) fb.onclick = async () => {
       fb.disabled = true;

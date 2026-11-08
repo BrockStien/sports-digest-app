@@ -465,3 +465,12 @@ tr.tap td.tm::after { content: " ›"; }
 .tl-team:active .nm { text-decoration: underline; }
 .auto-all { margin: 0 0 12px; }
 .next-season { display: flex; gap: 8px; align-items: flex-start; }
+.tp-sec > summary { cursor: pointer; list-style: none; }
+.tp-sec > summary::-webkit-details-marker { display: none; }
+.tp-sec .chev { display: inline-block; margin-left: 6px; transition: transform .15s; color: var(--muted); }
+.tp-sec:not([open]) .chev { transform: rotate(-90deg); }
+.tp-sec:not([open]) > summary { border-bottom: 0; }
+.tp-roster > summary { list-style: none; }
+.tp-roster > summary::-webkit-details-marker { display: none; }
+.tp-roster > summary::before { content: "▸ "; color: var(--muted); }
+.tp-roster[open] > summary::before { content: "▾ "; }
