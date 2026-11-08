@@ -1886,11 +1886,14 @@
     </div>${w}`;
   }
 
-  function teamLine(t, showScore, win) {
+  // Tap a team (logo or name) to open its team page.
+  function teamLine(t, showScore, win, league) {
     const label = (t.rank ? `#${t.rank} ` : "") + t.name;
+    const tap = league && t.id && LEAGUE[league] && !isPeople(league);
+    const inner = `${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy">` : ""}
+      <span class="nm">${esc(label)} ${t.record ? `<span class="rec">${esc(t.record)}</span>` : ""}</span>`;
     return `<div class="teamline ${win ? "win" : ""}">
-      ${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy">` : ""}
-      <span class="nm">${esc(label)} ${t.record ? `<span class="rec">${esc(t.record)}</span>` : ""}</span>
+      ${tap ? `<button type="button" class="tl-team" data-team="${esc(league)}:${esc(t.id)}" aria-label="${esc(t.name)} team page">${inner}</button>` : inner}
       ${showScore ? `<span class="sc">${esc(t.score ?? "")}</span>` : ""}
     </div>`;
   }
@@ -1907,8 +1910,8 @@
     else status = `<div class="status" style="text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);font-weight:600">${g.tbd ? "Time TBD" : esc(timeIn(g.start, s.timezone))}</div>`;
     return `<div class="row ${fav ? "fav" : ""}">
       ${fav ? '<div class="small star" aria-label="Your team">★ Your team</div>' : ""}
-      ${teamLine(g.away, showScore, aWin)}
-      ${teamLine(g.home, showScore, hWin)}
+      ${teamLine(g.away, showScore, aWin, g.league)}
+      ${teamLine(g.home, showScore, hWin, g.league)}
       ${status}
       ${done ? highlightsBox(g, fav) : ""}
       ${actions(g, fav, s)}
