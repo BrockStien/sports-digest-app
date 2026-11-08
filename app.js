@@ -1760,7 +1760,7 @@
         const o = home ? g.away : g.home;
         return `${home ? "vs" : "@"} ${o.rank ? "#" + o.rank + " " : ""}${o.name}`;
       };
-      const lastLine = last ? (() => {
+      const lastLine = last && !info.opening ? (() => {   // season over: no "Last game" line
         const mine = last.home.id === t.id ? last.home : last.away, o = mine === last.home ? last.away : last.home;
         const wl = mine.winner ? "W" : o.winner ? "L" : (+mine.score > +o.score ? "W" : +mine.score < +o.score ? "L" : "T");
         return `<div class="sched-last small muted">Last game: <strong class="${wl === "W" ? "win" : ""}">${wl} ${esc(mine.score)}–${esc(o.score)}</strong> ${esc(opp(last))} · ${esc(day(last.start))}</div>`;
