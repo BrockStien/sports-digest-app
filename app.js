@@ -1430,7 +1430,9 @@
     const fm = document.querySelector('[data-f="mine"]'), fa = document.querySelector('[data-f="all"]');
     if (fm && fa) { fm.setAttribute("aria-pressed", String(mineOnly)); fa.setAttribute("aria-pressed", String(!mineOnly)); }
     const whenNone = { "-1": "played yesterday", "0": "play today", "1": "play tomorrow" }[state.day];
-    let html = auto ? `<p class="notice small auto-all">None of your teams ${whenNone}, so here are all the games.</p>` : "";
+    // Shown whenever your teams aren't playing this day, whichever view you're on.
+    const noneToday = favs.size > 0 && favCount === 0 && !day.leagues.some(r => r.error);
+    let html = noneToday ? `<p class="notice small auto-all">None of your teams ${whenNone}${mineOnly ? "." : ", so here are all the games."}</p>` : "";
     let shown = 0;
     let failed = 0;
     for (const r of day.leagues) {
@@ -1457,8 +1459,8 @@
     if (!shown) {
       const when = { "-1": "played yesterday", "0": "play today", "1": "play tomorrow" }[state.day];
       const word = { "-1": "yesterday", "0": "today", "1": "tomorrow" }[state.day];
-      html = mineOnly
-        ? `<div class="empty">None of your teams ${when}.<br><button class="btn link" data-all>See all games</button></div>`
+      html += mineOnly
+        ? (noneToday ? `<div class="empty"><button class="btn link" data-all>See all games</button></div>` : `<div class="empty">None of your teams ${when}.<br><button class="btn link" data-all>See all games</button></div>`)
         : `<div class="empty">No games ${word} in your leagues.</div>`;
     }
     if (failed) html += `<p class="small muted center" style="padding:8px 0">Couldn't reach ESPN for ${failed} league${failed > 1 ? "s" : ""}. Tap ↻ to try again.</p>`;
