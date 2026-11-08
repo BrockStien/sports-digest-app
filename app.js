@@ -1627,7 +1627,20 @@
             const tp = await getJSON(`${FN()}/teams?league=${encodeURIComponent(t.league)}&team=${encodeURIComponent(t.id)}`);
             if (tp && tp.team) { rec = tp.team.record || rec; standing = [tp.team.standing, tp.team.conference].filter(Boolean).join(" · ") || standing; }
           } catch { /* keep ESPN's */ }
-          sc.teams[key] = { at: Date.now(), games, rec, standing };
+          // Season over: when does the next one start (and who's first, once the schedule is out)?
+          let opening = null;
+          if (games.length && !games.some(g => g.state !== "post" && !g.postponed)) {
+            try {
+              const op = await getJSON(`${FN()}/teams?league=${encodeURIComponent(t.league)}&opening=1`);
+              if (op && op.start) {
+                opening = { start: op.start, year: op.year, first: null };
+                const ns = await getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule?season=${op.year}`).catch(() => null);
+                const first = ((ns && ns.events) || []).map(e => parseGame(e, t.league)).filter(g => g.start && g.state === "pre").sort((a, b) => a.start - b.start)[0];
+                if (first) opening.first = first;
+              }
+            } catch { /* no line */ }
+          }
+          sc.teams[key] = { at: Date.now(), games, rec, standing, opening };
         } catch { sc.teams[key] = { at: Date.now(), games: [], failed: true }; }
       }));
     } finally { sc.loading = false; }
@@ -1765,7 +1778,12 @@
       }).join("");
       return `<section class="card">${head}
         ${summary || lastLine ? `<div class="row sched-sum">${summary ? `<div class="small">${esc(summary)}</div>` : ""}${lastLine}</div>` : ""}
-        ${rows || `<div class="row muted">No upcoming games scheduled right now.</div>`}
+        ${rows || (info.opening ? (() => {
+          const o = info.opening, f = o.first;
+          const startDay = new Date(o.start + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+          const firstLine = f ? `First game: <strong>${esc(day(f.start))}</strong> ${esc(opp(f))}${f.tbd ? "" : " · " + esc(timeIn(f.start, s.timezone))}` : "";
+          return `<div class="row next-season">🗓️ <span>Season's over. The next ${esc(LEAGUE[t.league].name)} season starts <strong>${esc(startDay)}</strong>.${firstLine ? `<br><span class="small">${firstLine}</span>` : ""}</span></div>`;
+        })() : `<div class="row muted">No upcoming games scheduled right now.</div>`)}
         ${upcoming.length > 5 ? `<div class="more"><button class="btn link" data-full="${esc(key)}">${sc.full[key] ? "Show fewer" : `Show all ${upcoming.length} upcoming games`}</button></div>` : ""}
       </section>`;
     }).join("") + `<p class="small muted center" style="padding:6px 0 14px">Ticket prices are from ESPN's ticket partner and change often. Golf, racing and UFC events are on the Games tab.</p>`;

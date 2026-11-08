@@ -182,6 +182,22 @@ async function teamPage(league: string, id: string) {
   };
 }
 
+// ---- Next season: ?league=mlb&opening=1 -> the next regular season's first day (from ESPN's season calendar).
+const CORE: Record<string, string> = { nfl: "football/leagues/nfl", nba: "basketball/leagues/nba", wnba: "basketball/leagues/wnba", nhl: "hockey/leagues/nhl",
+  mlb: "baseball/leagues/mlb", cfb: "football/leagues/college-football", cbb: "basketball/leagues/mens-college-basketball" };
+async function nextSeason(league: string) {
+  const now = Date.now(), y = new Date().getUTCFullYear();
+  for (const year of [y, y + 1, y + 2]) {
+    try {
+      const t = await espn(`https://sports.core.api.espn.com/v2/sports/${CORE[league]}/seasons/${year}/types/2`);
+      const start = Date.parse(t?.startDate);
+      // Season dates are midnight Pacific; shift back so the calendar date is right.
+      if (Number.isFinite(start) && start > now) return { league, year, start: new Date(start - 8 * 3600e3).toISOString().slice(0, 10) };
+    } catch { /* try the next year */ }
+  }
+  return { league, year: null, start: null };
+}
+
 const json = (body: string, status = 200) =>
   new Response(body, { status, headers: { ...CORS, "Content-Type": "application/json", ...(status === 200 ? { "Cache-Control": "public, max-age=86400" } : {}) } });
 
@@ -194,6 +210,13 @@ Deno.serve(async (req) => {
   const league = params.get("league") || "";
   const path = PATHS[league];
   if (!path) return json(JSON.stringify({ error: "unknown league" }), 400);
+  if (params.get("opening") && CORE[league]) {
+    const ck = `opening:${league}`, h = cache.get(ck);
+    if (h && Date.now() - h.at < 12 * 3600e3) return json(h.body);
+    const body = JSON.stringify(await nextSeason(league));
+    cache.set(ck, { at: Date.now(), body });
+    return json(body);
+  }
   const teamId = params.get("team") || "";
   if (teamId) {
     if (!/^\d{1,10}$/.test(teamId) || ["pga", "f1", "nascar", "ufc"].includes(league)) return json(JSON.stringify({ error: "bad team" }), 400);
