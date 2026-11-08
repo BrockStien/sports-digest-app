@@ -949,7 +949,9 @@
   function openTeam(key) {
     const [league, id] = key.split(":");
     if (!LEAGUE[league] || !id) return;
-    state.teamView = { league, id, from: state.tab === "team" ? (state.teamView || {}).from : state.tab };
+    const fromPickem = state.tab === "chat" && state.chat.thread === "pickem";
+    state.teamView = { league, id, from: state.tab === "team" ? (state.teamView || {}).from : state.tab,
+      pickem: state.tab === "team" ? !!(state.teamView || {}).pickem : fromPickem };   // from Pick'em: skip "Upcoming"
     state.tab = "team"; renderApp(); window.scrollTo(0, 0);
   }
   $app.addEventListener("click", e => {
@@ -1009,8 +1011,8 @@
         ${fav ? `<span class="small muted">★ One of your teams</span>` : `<button type="button" class="btn" id="tpFav">☆ Add to my teams</button>`}
         ${t.link ? `<a class="btn" href="${esc(t.link)}" target="_blank" rel="noopener">ESPN team page</a>` : ""}
       </div>
-      <section class="card"><div class="card-head"><span>Upcoming</span></div>
-        ${d.upcoming.length ? d.upcoming.map(gameRow).join("") : `<div class="row muted">No upcoming games scheduled.</div>`}</section>
+      ${v.pickem ? "" : `<section class="card"><div class="card-head"><span>Upcoming</span></div>
+        ${d.upcoming.length ? d.upcoming.map(gameRow).join("") : `<div class="row muted">No upcoming games scheduled.</div>`}</section>`}
       <section class="card"><div class="card-head"><span>Recent results</span></div>
         ${d.recent.length ? d.recent.map(gameRow).join("") : `<div class="row muted">No games yet this season.</div>`}</section>
       <section class="card"><div class="card-head"><span>Injuries</span><span class="small">${d.injuries.length || ""}</span></div>
