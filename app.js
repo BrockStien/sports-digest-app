@@ -45,7 +45,7 @@
     timezone: TIMEZONES.some(t => t[0] === detectedTz) ? detectedTz : "America/Phoenix",
     headlines_per_league: 3, favorites_only_headlines: true, calendar_links: "all",
     calendar_attachment: true, reminder_minutes: 30, ticket_links: "favorites",
-    theme: "system",
+    theme: "system", email_style: "detailed", email_frequency: "daily",
   };
   const PUSH_ON = !!(CFG.VAPID_PUBLIC_KEY && CFG.VAPID_PUBLIC_KEY.length > 40);
   const NOTIFY_DEFAULTS = {
@@ -355,9 +355,19 @@
     });
     const pj = (location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/) || [])[1];
     if (pj) store.set("pendingJoin", pj);
+    const inv = (location.hash.match(/^#invite=([0-9a-f]{6,20})$/) || [])[1];
+    if (inv) { store.set("pendingInvite", inv); history.replaceState(null, "", location.pathname + location.search); }
+    if (store.get("pendingInvite")) await loadInvite();
     const { data } = await sb.auth.getSession();
     if (data && data.session) await loadAccount(data.session.user);
-    else renderSignIn(linkErr);
+    else renderSignIn(linkErr, state.invite ? "signup" : "signin");
+  }
+  async function loadInvite() {
+    try {
+      const { data } = await sb.rpc("get_invite", { c: store.get("pendingInvite") });
+      state.invite = data ? { note: data.note || "", from: data.from || "", leagues: data.leagues || [], favorite_teams: data.favorite_teams || [] } : null;
+      if (!data) store.set("pendingInvite", null);
+    } catch { state.invite = null; }
   }
 
   async function loadAccount(user) {
@@ -373,6 +383,10 @@
     }
     state.sub = data;
     state.draft = { ...DEFAULTS, ...(data || {}) };
+    if (!data && state.invite) {          // new account from an invite link: start with the suggested teams
+      if (state.invite.leagues.length) state.draft.leagues = state.invite.leagues.filter(k => LEAGUE[k]);
+      state.draft.favorite_teams = [...state.invite.favorite_teams];
+    } else if (data && store.get("pendingInvite")) { store.set("pendingInvite", null); state.invite = null; }
     if (data && data.theme) applyTheme(data.theme);
     if (data) syncPhone();          // keep this phone's notification sign-up current
     const joinCode = (location.hash.match(/^#join=([0-9a-fA-F]{6,32})$/) || [])[1] || store.get("pendingJoin");
@@ -404,6 +418,7 @@
     $app.innerHTML = `<div class="signin">
       <img class="brand" src="icons/icon-192.png" alt="">
       <div class="kicker">${esc(APP_NAME)}</div>
+      ${state.invite ? `<div class="notice invite-note">👋 ${state.invite.from ? esc(state.invite.from) + " invited you" : "You're invited"}${state.invite.favorite_teams.length ? `. These teams will be ready for you: <b>${esc(state.invite.favorite_teams.slice(0, 6).join(", "))}${state.invite.favorite_teams.length > 6 ? "…" : ""}</b>` : ""}${state.invite.note ? `<div class="small">“${esc(state.invite.note)}”</div>` : ""}</div>` : ""}
       <h1>${up ? "Create your account" : "Your teams, every morning"}</h1>
       <p class="muted">${up ? "Pick a password you'll use to sign in on any device."
         : "Scores, today's games, tickets and calendar invites, plus a daily email with just the teams you follow."}</p>
@@ -611,7 +626,8 @@
   function renderApp() {
     $app.className = "";
     const first = !state.sub;
-    if (!["today", "sched", "news", "chat", "teams", "admin"].includes(state.tab) || (state.tab === "chat" && state.chat.ok === false) || (state.tab === "admin" && (!state.isAdmin || first))) state.tab = "today";
+    if (state.tab === "team" && !state.teamView) state.tab = "sched";
+    if (!["today", "sched", "news", "chat", "teams", "admin", "team"].includes(state.tab) || (state.tab === "chat" && state.chat.ok === false) || (state.tab === "admin" && (!state.isAdmin || first))) state.tab = "today";
     const tab = (key, icon, label) =>
       `<button data-tab="${key}" ${state.tab === key ? 'aria-current="page"' : ""}>${icon}${label}</button>`;
     $app.innerHTML = `
@@ -631,6 +647,7 @@
     else if (state.tab === "sched") renderSched();
     else if (state.tab === "chat") renderChat();
     else if (state.tab === "admin") renderAdmin();
+    else if (state.tab === "team") renderTeamPage();
     else renderToday();
     paintChatBadge();
   }
@@ -694,12 +711,12 @@
       </header>
       <button class="btn link back" type="button" id="admBack">‹ My Teams</button>
       <div class="seg wide" role="group" aria-label="Admin section">
-        ${[["status", "Status"], ["log", "Error log"], ["users", "Users"]].map(([k, l]) =>
+        ${[["status", "Status"], ["stats", "Stats"], ["log", "Log"], ["users", "Users"], ["invites", "Invites"]].map(([k, l]) =>
           `<button data-av="${k}" aria-pressed="${a.view === k}">${l}</button>`).join("")}
       </div>
       <div id="adm"><div class="empty">Loading…</div></div>`;
     document.querySelectorAll("[data-av]").forEach(b => b.onclick = () => { a.view = b.dataset.av; renderAdmin(); });
-    document.getElementById("refresh").onclick = loadAdmin;
+    document.getElementById("refresh").onclick = () => { a.stats = null; a.invites = null; loadAdmin(); };
     document.getElementById("admBack").onclick = () => { state.tab = "teams"; store.set("tab", "teams"); renderApp(); window.scrollTo(0, 0); };
     if (a.data) paintAdmin();
     if (!a.data || Date.now() - a.at > 60e3) loadAdmin();
@@ -711,6 +728,7 @@
     const r = document.getElementById("refresh"); if (r) r.classList.toggle("spin", a.loading);
     if (!a.data) { box.innerHTML = `<div class="empty">${a.err ? esc(a.err) : "Loading…"}</div>`; return; }
     const err = a.err ? `<p class="notice">Couldn't refresh: ${esc(a.err)}</p>` : "";
+    if (a.view === "stats" || a.view === "invites") return paintAdminExtra(box, err);
     box.innerHTML = err + (a.view === "log" ? adminLog() : a.view === "users" ? adminUsers() : adminStatus());
     if (a.view === "log") {
       box.querySelectorAll("[data-lf]").forEach(b => b.onclick = () => { a.filter = b.dataset.lf; paintAdmin(); });
@@ -859,6 +877,230 @@
       paintUsers();
       a.at = 0; loadAdmin();           // refresh counts and the log entry
     });
+  }
+
+
+  // ------------------------------------------------------------ calendar sync (My Teams)
+  const FN = () => CFG.SUPABASE_URL.replace(/\/$/, "") + "/functions/v1";
+  const calUrl = () => state.sub && state.sub.calendar_token ? `${FN()}/calendar?t=${state.sub.calendar_token}` : "";
+  function calendarSync() {
+    const https = calUrl();
+    if (!https) return "";
+    const webcal = https.replace(/^https:/, "webcal:");
+    return `
+      <h2>Calendar sync</h2>
+      <div class="card calsync">
+        <p class="small">All your teams' games in your phone's calendar, with TV channels and ticket prices. When a time changes or a game ends, your calendar updates by itself, and adding or removing favorites here updates it too.</p>
+        <a class="btn block primary" href="${esc(webcal)}">📅 Add to iPhone / Mac Calendar</a>
+        <a class="btn block" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}" target="_blank" rel="noopener">Add to Google Calendar</a>
+        <button type="button" class="btn block" data-copy-cal>Copy link (Outlook and others)</button>
+        <p class="small muted">On iPhone, tap the first button, then <b>Subscribe</b> → <b>Add</b>. Your phone checks for changes every few hours. The link is private to you; if you shared it by mistake, <button type="button" class="btn link small" data-reset-cal>get a new link</button> (the old one stops working, so subscribe again).</p>
+      </div>`;
+  }
+  $app.addEventListener("click", async e => {
+    if (e.target.closest("[data-copy-cal]")) {
+      e.preventDefault();
+      try { await navigator.clipboard.writeText(calUrl()); toast("Calendar link copied"); } catch { toast(calUrl()); }
+    } else if (e.target.closest("[data-reset-cal]")) {
+      e.preventDefault();
+      const token = crypto.randomUUID();
+      const { error } = await sb.from("subscribers").update({ calendar_token: token }).eq("id", state.user.id);
+      if (error) { toast("Couldn't reset: " + error.message); return; }
+      state.sub.calendar_token = token; state.draft.calendar_token = token;
+      toast("New calendar link made. Subscribe again with the button above.");
+      renderApp();
+    }
+  });
+
+  // ------------------------------------------------------------ team pages
+  // Tap a team (Schedule tab, standings) for its record, next games, results, injuries, news and roster.
+  state.teamPages = {};
+  function openTeam(key) {
+    const [league, id] = key.split(":");
+    if (!LEAGUE[league] || !id) return;
+    state.teamView = { league, id, from: state.tab === "team" ? (state.teamView || {}).from : state.tab };
+    state.tab = "team"; renderApp(); window.scrollTo(0, 0);
+  }
+  $app.addEventListener("click", e => {
+    const t = e.target.closest("[data-team]");
+    if (t && !e.target.closest("a")) { e.preventDefault(); openTeam(t.dataset.team); }
+  });
+  async function loadTeamPage(force) {
+    const v = state.teamView, key = `${v.league}:${v.id}`, cur = state.teamPages[key];
+    if (cur && (cur.loading || (!force && Date.now() - cur.at < 5 * 60e3))) return;
+    state.teamPages[key] = { ...(cur || {}), loading: true };
+    const r = document.getElementById("refresh"); if (r) r.classList.add("spin");
+    try {
+      const data = await getJSON(`${FN()}/teams?league=${encodeURIComponent(v.league)}&team=${encodeURIComponent(v.id)}`);
+      if (data.error) throw new Error(data.error);
+      state.teamPages[key] = { at: Date.now(), data };
+    } catch (err) { state.teamPages[key] = { ...(cur || {}), at: Date.now(), err: String(err.message || err) }; }
+    if (state.tab === "team" && state.teamView && `${state.teamView.league}:${state.teamView.id}` === key) paintTeamPage();
+  }
+  function renderTeamPage() {
+    document.getElementById("view").innerHTML = `
+      <header class="top">
+        <div><button class="btn link back" type="button" id="teamBack">‹ Back</button></div>
+        <button class="icon-btn" id="refresh" aria-label="Refresh">${ICON.refresh}</button>
+      </header>
+      <div id="teamPage"><div class="empty">Loading team…</div></div>`;
+    document.getElementById("teamBack").onclick = () => { state.tab = state.teamView.from || "sched"; renderApp(); window.scrollTo(0, 0); };
+    document.getElementById("refresh").onclick = () => loadTeamPage(true);
+    paintTeamPage();
+    loadTeamPage(false);
+  }
+  function paintTeamPage() {
+    const box = document.getElementById("teamPage");
+    if (!box) return;
+    const v = state.teamView, page = state.teamPages[`${v.league}:${v.id}`] || {};
+    const r = document.getElementById("refresh"); if (r) r.classList.toggle("spin", !!page.loading);
+    if (!page.data) { box.innerHTML = `<div class="empty">${page.err ? "Couldn't load this team. Tap ↻ to try again." : "Loading team…"}</div>`; return; }
+    const d = page.data, t = d.team, s = state.sub;
+    const fav = [t.name, t.short, t.abbr].some(n => n && favSet().has(n.toLowerCase()));
+    const day = iso => new Intl.DateTimeFormat("en-US", { timeZone: s.timezone, weekday: "short", month: "short", day: "numeric" }).format(new Date(iso));
+    const opp = g => `${g.home ? "vs" : "@"} ${g.opp.rank ? "#" + g.opp.rank + " " : ""}${esc(g.opp.name)}`;
+    const gameRow = g => `<div class="row tp-game">
+        ${g.opp.logo ? `<img class="logo" src="${esc(g.opp.logo)}" alt="" loading="lazy">` : ""}
+        <div class="tp-main"><div><strong>${opp(g)}</strong></div>
+          <div class="small muted">${esc(day(g.date))} · ${g.state === "in" ? `<span class="live">● ${esc(g.detail)}</span>` : g.state === "post" ? esc(g.detail || "Final") : esc(timeIn(new Date(g.date), s.timezone))}${g.tv ? " · " + esc(g.tv) : ""}</div></div>
+        ${g.result ? `<span class="tp-res ${g.result === "W" ? "w" : g.result === "L" ? "l" : ""}">${g.result} ${esc(g.score)}</span>` : g.state === "in" ? `<span class="tp-res">${esc(g.score)}</span>`
+          : g.tickets ? `<a class="pill ticket" href="${esc(g.tickets.link)}" target="_blank" rel="noopener">🎟 $${Math.round(g.tickets.price)}</a>` : ""}
+      </div>`;
+    const injClass = st => /out|reserve/i.test(st) ? "out" : /doubt/i.test(st) ? "doubt" : "q";
+    box.innerHTML = `
+      <section class="tp-hero" style="--team:${esc(t.color || "var(--accent)")}">
+        ${t.logo ? `<img src="${esc(t.logo)}" alt="" class="tp-logo">` : ""}
+        <div class="tp-id"><div class="kicker">${esc(LEAGUE[v.league].name)}</div><h1>${esc(t.name)}</h1>
+          <div class="small">${[t.record && `Record ${esc(t.record)}`, esc(t.standing)].filter(Boolean).join(" · ")}</div>
+          ${t.coach ? `<div class="small muted">Coach: ${esc(t.coach)}</div>` : ""}</div>
+      </section>
+      <div class="tp-actions">
+        ${fav ? `<span class="small muted">★ One of your teams</span>` : `<button type="button" class="btn" id="tpFav">☆ Add to my teams</button>`}
+        ${t.link ? `<a class="btn" href="${esc(t.link)}" target="_blank" rel="noopener">ESPN team page</a>` : ""}
+      </div>
+      <section class="card"><div class="card-head"><span>Upcoming</span></div>
+        ${d.upcoming.length ? d.upcoming.map(gameRow).join("") : `<div class="row muted">No upcoming games scheduled.</div>`}</section>
+      <section class="card"><div class="card-head"><span>Recent results</span></div>
+        ${d.recent.length ? d.recent.map(gameRow).join("") : `<div class="row muted">No games yet this season.</div>`}</section>
+      <section class="card"><div class="card-head"><span>Injuries</span><span class="small">${d.injuries.length || ""}</span></div>
+        ${d.injuries.length ? d.injuries.map(p => `<div class="row tp-inj"><span>${esc(p.name)} <span class="small muted">${esc(p.pos)}</span></span><span class="inj ${injClass(p.status)}">${esc(p.status)}</span></div>`).join("")
+          : `<div class="row muted">No injuries reported.</div>`}</section>
+      ${d.news.length ? `<section class="card"><div class="card-head"><span>News</span></div>
+        ${d.news.map(n => `<a class="row tp-news" href="${esc(n.link)}" target="_blank" rel="noopener"><div><strong>${esc(n.headline)}</strong>${n.description ? `<div class="small muted">${esc(n.description.slice(0, 140))}</div>` : ""}</div></a>`).join("")}</section>` : ""}
+      <section class="card"><div class="card-head"><span>Roster</span></div>
+        ${d.roster.length ? d.roster.map((g, i) => `<details class="tp-roster" ${i === 0 ? "open" : ""}><summary>${esc(g.name)} <span class="small muted">${g.players.length}</span></summary>
+          ${g.players.map(p => `<div class="row tp-player"><span class="num">${esc(p.jersey || "")}</span><span class="nm">${esc(p.name)}</span><span class="small muted">${esc(p.pos)}</span>${p.status ? `<span class="inj ${injClass(p.status)}">${esc(p.status)}</span>` : ""}</div>`).join("")}</details>`).join("")
+          : `<div class="row muted">Roster not available.</div>`}</section>`;
+    const fb = document.getElementById("tpFav");
+    if (fb) fb.onclick = async () => {
+      fb.disabled = true;
+      const favorite_teams = [...new Set([...(s.favorite_teams || []), t.name])];
+      const leagues = s.leagues.includes(v.league) ? s.leagues : LEAGUES.map(l => l.key).filter(k => k === v.league || s.leagues.includes(k));
+      const { data, error } = await sb.from("subscribers").update({ favorite_teams, leagues }).eq("id", state.user.id).select().single();
+      if (error) { fb.disabled = false; toast("Couldn't add: " + error.message); return; }
+      state.sub = data; state.draft = { ...DEFAULTS, ...data };
+      state.sched.mine = null; state.sched.at = 0; state.days = {};
+      toast(`${t.short || t.name} added to your teams`);
+      paintTeamPage();
+    };
+  }
+
+  // ------------------------------------------------------------ admin: stats + invites
+  async function paintAdminExtra(box, err) {
+    const a = state.admin;
+    const r = document.getElementById("refresh"); if (r) r.classList.toggle("spin", a.loading);
+    if (a.view === "stats") {
+      if (!a.stats || Date.now() - a.statsAt > 60e3) {
+        if (!a.stats) box.innerHTML = `<div class="empty">Loading…</div>`;
+        const { data, error } = await sb.rpc("admin_stats");
+        if (error) { box.innerHTML = `<div class="empty">Couldn't load stats: ${esc(error.message)}</div>`; return; }
+        a.stats = data; a.statsAt = Date.now();
+        if (state.tab !== "admin" || a.view !== "stats") return;
+      }
+      box.innerHTML = err + adminStatsHtml(a.stats);
+    } else {
+      if (!a.invites) {
+        box.innerHTML = `<div class="empty">Loading…</div>`;
+        const { data, error } = await sb.rpc("admin_invites", { action: "list", payload: {} });
+        if (error) { box.innerHTML = `<div class="empty">Couldn't load invites: ${esc(error.message)}</div>`; return; }
+        a.invites = data;
+        if (state.tab !== "admin" || a.view !== "invites") return;
+      }
+      box.innerHTML = err + adminInvitesHtml();
+      wireInvites(box);
+    }
+  }
+  const KIND_NAME = { score: "Score updates", final: "Finals", start: "Starting soon", big: "Big plays", close: "Close finishes", digest: "Morning summary",
+    highlight: "Highlights", milestone: "Milestones", drama: "Comebacks / OT / upsets", period: "Period scores", news: "Team news", schedule: "Schedule changes",
+    standings: "Standings", tickets: "Ticket drops", event: "Golf / racing / UFC", chat: "Chat messages" };
+  function adminStatsHtml(st) {
+    const tile = (n, label) => `<div><b>${n ?? 0}</b><span>${label}</span></div>`;
+    const bar = (rows, total) => rows.map(([label, n]) => `<div class="bar-row"><span class="bl">${esc(label)}</span><span class="bt"><span style="width:${Math.max(3, Math.round(100 * n / Math.max(1, total)))}%"></span></span><span class="bn">${n}</span></div>`).join("");
+    const kinds = Object.entries(st.alerts7 || {}).sort((a, b) => b[1] - a[1]);
+    const kindsTotal = kinds.reduce((t, [, n]) => t + n, 0);
+    const daily = st.alerts_daily || [];
+    const maxDay = Math.max(1, ...daily.map(x => x.sent));
+    const lg = Object.entries(st.leagues || {}).sort((a, b) => b[1] - a[1]);
+    const fmtDay = d => new Date(d + "T12:00:00").toLocaleDateString([], { month: "short", day: "numeric" });
+    return `
+      <h2>People</h2>
+      <div class="adm-stats">${tile(st.accounts, "accounts")}${tile(st.active7, "signed in, last 7 days")}${tile(st.active30, "signed in, last 30 days")}${tile(st.new30, "new in 30 days")}</div>
+      <h2>Alerts</h2>
+      <div class="adm-stats">${tile(st.devices, "phones / browsers with alerts")}${tile(st.pushed7, "people alerted this week")}${tile(kindsTotal, "alerts sent, last 7 days")}${tile(st.chat_msgs7, "chat messages this week")}</div>
+      ${daily.length ? `<div class="card spark-card"><div class="small muted">Alerts per day (last 14 days)</div><div class="spark">${daily.map(x => `<span title="${esc(fmtDay(x.day))}: ${x.sent}" style="height:${Math.max(4, Math.round(100 * x.sent / maxDay))}%"></span>`).join("")}</div>
+        <div class="spark-lab small muted"><span>${esc(fmtDay(daily[0].day))}</span><span>${esc(fmtDay(daily[daily.length - 1].day))}</span></div></div>` : ""}
+      <div class="card bars">${kinds.length ? bar(kinds.map(([k, n]) => [KIND_NAME[k] || k, n]), kinds[0][1]) : `<div class="small muted">No alerts counted yet. Counting started Nov 7.</div>`}</div>
+      <h2>Email</h2>
+      <div class="adm-stats">${tile(st.email_on, "get email")}${tile((st.email_freq || {}).weekly || 0, "weekly only")}${tile((st.email_freq || {}).both || 0, "daily + weekly")}${tile((st.email_styles || {}).compact || 0, "compact style")}</div>
+      <div class="card">${(st.emails || []).length ? st.emails.map(e => `<div class="row small"><span class="dot ${esc(e.level)}"></span> ${esc(new Date(e.at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))} · ${esc(e.title)}</div>`).join("")
+        : `<div class="row small muted">No email runs reported yet. The first one shows up after tomorrow morning's email.</div>`}
+        <div class="row small muted">Open rates aren't tracked: that needs tracking pixels, which many mail apps block and which would track your users.</div></div>
+      <h2>What people follow</h2>
+      <div class="card bars">${bar(lg.map(([k, n]) => [(LEAGUE[k] || { name: k }).name, n]), (lg[0] || [0, 1])[1])}</div>
+      <div class="card bars">${bar((st.teams || []).map(x => [x.team, x.fans]), ((st.teams || [])[0] || { fans: 1 }).fans)}</div>`;
+  }
+  function adminInvitesHtml() {
+    const s = state.sub, list = state.admin.invites || [];
+    const link = c => `${location.origin}${location.pathname}#invite=${c}`;
+    return `
+      <h2>New invite link</h2>
+      <div class="card inv-new">
+        <p class="small">Anyone who opens the link gets a sign-up screen with these teams already picked. They can change them before saving.</p>
+        <input id="invNote" maxlength="80" placeholder="Note they'll see (optional), e.g. “Join our Vikings chat!”">
+        <div class="small muted" style="margin:8px 0 4px">Suggested teams (from your favorites)</div>
+        <div class="inv-teams">${(s.favorite_teams || []).map((f, i) => `<label class="inv-team"><input type="checkbox" data-inv-team="${i}" checked> ${esc(f)}</label>`).join("") || `<span class="small muted">You have no favorites yet.</span>`}</div>
+        <button class="btn primary block" type="button" id="invMake">Create invite link</button>
+      </div>
+      <h2>Your invite links</h2>
+      ${list.length ? `<div class="card">${list.map(i => `<div class="row inv-row ${i.active ? "" : "off"}">
+          <div class="inv-main"><div><b>${esc(i.note || "Invite")}</b> ${i.active ? "" : `<span class="atag">turned off</span>`}</div>
+            <div class="small muted">${i.uses} sign-up${i.uses === 1 ? "" : "s"} · made ${esc(new Date(i.created_at).toLocaleDateString([], { month: "short", day: "numeric" }))} · ${esc((i.favorite_teams || []).slice(0, 4).join(", ") || "no teams")}${(i.favorite_teams || []).length > 4 ? "…" : ""}</div></div>
+          ${i.active ? `<div class="inv-btns"><button class="btn" type="button" data-inv-share="${esc(link(i.code))}">Share</button><button class="btn link small" type="button" data-inv-off="${esc(i.code)}">Turn off</button></div>` : ""}
+        </div>`).join("")}</div>` : `<div class="empty">No invite links yet.</div>`}`;
+  }
+  function wireInvites(box) {
+    const a = state.admin, s = state.sub;
+    const mk = box.querySelector("#invMake");
+    if (mk) mk.onclick = async () => {
+      mk.disabled = true;
+      const favorite_teams = [...box.querySelectorAll("[data-inv-team]")].filter(c => c.checked).map(c => s.favorite_teams[+c.dataset.invTeam]);
+      const { data, error } = await sb.rpc("admin_invites", { action: "create", payload: { note: box.querySelector("#invNote").value.trim(), favorite_teams, leagues: s.leagues } });
+      mk.disabled = false;
+      if (error) { toast("Couldn't create: " + error.message); return; }
+      a.invites = data; paintAdmin();
+      const code = data[0] && data[0].code;
+      if (code) shareInvite(`${location.origin}${location.pathname}#invite=${code}`);
+    };
+    box.querySelectorAll("[data-inv-share]").forEach(b => b.onclick = () => shareInvite(b.dataset.invShare));
+    box.querySelectorAll("[data-inv-off]").forEach(b => b.onclick = async () => {
+      const { data, error } = await sb.rpc("admin_invites", { action: "disable", payload: { code: b.dataset.invOff } });
+      if (error) { toast("Couldn't turn off: " + error.message); return; }
+      a.invites = data; paintAdmin(); toast("Invite link turned off");
+    });
+  }
+  async function shareInvite(url) {
+    if (navigator.share) { try { await navigator.share({ title: "Join me on Sports Digest", text: "Scores and alerts for our teams:", url }); return; } catch (e) { if (e && e.name === "AbortError") return; } }
+    try { await navigator.clipboard.writeText(url); toast("Invite link copied"); } catch { toast(url); }
   }
 
   // ------------------------------------------- games: yesterday / today / tomorrow
@@ -1237,7 +1479,7 @@
     box.innerHTML = sc.mine.map(t => {
       const key = `${t.league}:${t.id}`;
       const info = sc.teams[key];
-      const head = `<div class="card-head"><span>${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy"> ` : ""}${esc(t.name)}</span>
+      const head = `<div class="card-head"><button type="button" class="team-link" data-team="${esc(t.league)}:${esc(t.id)}">${t.logo ? `<img class="logo" src="${esc(t.logo)}" alt="" loading="lazy"> ` : ""}${esc(t.name)} <span class="chev">›</span></button>
         <span>${esc(LEAGUE[t.league].name)}</span></div>`;
       if (!info) return `<section class="card">${head}<div class="row muted">Loading…</div></section>`;
       if (info.failed) return `<section class="card">${head}<div class="row muted">Couldn't load this schedule. Tap ↻ to try again.</div></section>`;
@@ -1306,7 +1548,7 @@
         if (race && !showAll(k)) rows = rows.filter((r, i) => i < 10 || isMine(k, r));   // top 10 plus your drivers
         return `<div class="stand-group">${groups.length > 1 || !race ? `<div class="stand-name">${esc(g.name)}</div>` : ""}
           <table class="stand"><thead><tr><th class="tm">${race ? "Driver" : "Team"}</th>${cols.map(c => `<th>${c[0]}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map((r, i) => `<tr class="${isMine(k, r) ? "mine" : ""}">
+          <tbody>${rows.map((r, i) => `<tr class="${isMine(k, r) ? "mine" : ""}${!race && r.id ? " tap" : ""}"${!race && r.id ? ` data-team="${esc(k)}:${esc(r.id)}"` : ""}>
             <td class="tm"><span class="rk">${race ? (r.rank || i + 1) : i + 1}</span>${r.logo && !race ? `<img class="logo" src="${esc(r.logo)}" alt="" loading="lazy">` : ""}${isMine(k, r) ? '<span class="star">★</span> ' : ""}${esc(race ? r.name : r.short)}</td>
             ${cols.map(c => `<td>${esc(c[1] === "rec" ? r.rec : ((r.st[c[1]] || {}).d ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
       }).join("")}</section>`;
@@ -1976,10 +2218,14 @@
         <p class="hint" id="teamHint">Search, or pick a league (and its conference or division), then a team. For golf, racing and UFC you pick people. Favorites are starred, listed first, and get ticket links and calendar invites.</p>
       </div>
 
-      <h2>Daily email</h2>
+      <h2>Email</h2>
       <div class="card">
-        <div class="switch-row"><div class="txt"><div>Send my daily email</div><span class="small muted">Arrives around 6:45 AM Arizona time. Turn off to just use the app.</span></div>
-          <label class="switch"><input type="checkbox" id="active" ${d.active ? "checked" : ""} aria-label="Send my daily email"><span></span></label></div>
+        <div class="switch-row"><div class="txt"><div>Send me email</div><span class="small muted">Arrives around 6:45 AM Arizona time. Turn off to just use the app.</span></div>
+          <label class="switch"><input type="checkbox" id="active" ${d.active ? "checked" : ""} aria-label="Send me email"><span></span></label></div>
+        <div class="switch-row"><div class="txt"><div>How often</div><span class="small muted">Weekly = a Sunday “week ahead”: last week's results and the next 7 days</span></div>
+          <select id="email_frequency" aria-label="How often">${[["daily", "Every day"], ["weekly", "Weekly (Sunday)"], ["both", "Daily + weekly"]].map(([v, l]) => `<option value="${v}" ${d.email_frequency === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+        <div class="switch-row"><div class="txt"><div>Style</div><span class="small muted">Compact = one line per game, fewer headlines, no pictures</span></div>
+          <select id="email_style" aria-label="Email style">${[["detailed", "Detailed"], ["compact", "Compact"]].map(([v, l]) => `<option value="${v}" ${d.email_style === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>
         <div class="switch-row"><div class="txt"><div>Time zone</div><span class="small muted">For game times</span></div>
           <select id="timezone" aria-label="Time zone">${tzOptions(d.timezone)}</select></div>
         <div class="switch-row"><div class="txt"><div>Ticket links</div></div>
@@ -2009,6 +2255,8 @@
 
       ${phoneSetup()}
 
+      ${first ? "" : calendarSync()}
+
       <h2>Account</h2>
       <div id="adminSlot">${first ? "" : adminLink()}</div>
       <p class="small muted">Signed in as ${esc(state.user.email)}</p>
@@ -2030,7 +2278,7 @@
     });
     // simple fields
     view.querySelector("#name").oninput = e => d.name = e.target.value;
-    ["timezone", "ticket_links", "calendar_links"].forEach(id => view.querySelector("#" + id).onchange = e => d[id] = e.target.value);
+    ["timezone", "ticket_links", "calendar_links", "email_frequency", "email_style"].forEach(id => view.querySelector("#" + id).onchange = e => d[id] = e.target.value);
     ["active", "calendar_attachment", "favorites_only_headlines"].forEach(id => view.querySelector("#" + id).onchange = e => d[id] = e.target.checked);
     ["reminder_minutes", "headlines_per_league"].forEach(id => view.querySelector("#" + id).oninput = e => d[id] = e.target.value);
     if (PUSH_ON) wireNotify(view, d);
@@ -2205,6 +2453,7 @@
     state.news = null;
     state.newsMine = null;
     if (first) {
+      if (store.get("pendingInvite")) { sb.rpc("use_invite", { c: store.get("pendingInvite") }).then(() => {}, () => {}); store.set("pendingInvite", null); state.invite = null; }
       state.tab = "today"; store.set("tab", "today");
       renderApp();
       loadGroups();
@@ -2212,7 +2461,7 @@
       if (pj) { handleJoin(String(pj).toLowerCase()); return; }
       toast("You're in! Your first email arrives tomorrow morning.");
     } else {
-      toast(data.active ? "Saved. Changes apply to tomorrow's email." : "Saved. Daily email is off; everything is still in the app.");
+      toast(data.active ? `Saved. Changes apply to your next email.` : "Saved. Email is off; everything is still in the app.");
     }
   }
 

@@ -361,3 +361,61 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .howto code { background: var(--chip); border-radius: 4px; padding: 1px 4px; font-size: 12px; }
 .howto .notice.good { margin: 10px 0; }
 .howto [data-show-os] { margin: 0 0 12px; }
+
+/* Team pages */
+.team-link { background: none; border: 0; padding: 0; font: inherit; color: inherit; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; text-align: left; }
+.team-link .chev, tr.tap td.tm::after { color: var(--muted); }
+tr.tap { cursor: pointer; }
+tr.tap td.tm::after { content: " ›"; }
+.tp-hero { display: flex; gap: 14px; align-items: center; margin: 4px 0 12px; padding: 14px; border-radius: var(--radius); border: 1px solid var(--rule);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--team) 18%, var(--card)), var(--card)); }
+.tp-hero h1 { margin: 2px 0 4px; font-size: 24px; }
+.tp-logo { width: 64px; height: 64px; object-fit: contain; flex: none; }
+.tp-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.tp-actions .btn { height: 40px; }
+.tp-game { display: flex; align-items: center; gap: 10px; }
+.tp-game .logo { width: 26px; height: 26px; object-fit: contain; }
+.tp-main { flex: 1; min-width: 0; }
+.tp-res { font-weight: 700; font-size: 14px; white-space: nowrap; }
+.tp-res.w { color: #1f9d55; }
+.tp-res.l { color: #d92d20; }
+.tp-inj, .tp-player { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tp-player { justify-content: flex-start; }
+.tp-player .num { width: 28px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tp-player .nm { flex: 1; }
+.inj { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: 2px 6px; border-radius: 6px; background: var(--chip); white-space: nowrap; }
+.inj.out { color: #d92d20; }
+.inj.doubt { color: #b54708; }
+.inj.q { color: #a15c07; }
+.tp-news { display: block; color: inherit; text-decoration: none; }
+.tp-roster summary { padding: 10px 14px; cursor: pointer; font-weight: 600; border-top: 1px solid var(--rule); }
+.tp-roster:first-of-type summary { border-top: 0; }
+
+/* Calendar sync */
+.calsync { padding: 12px 14px; }
+.calsync .btn.block { margin: 8px 0; height: 44px; }
+.calsync p { margin: 6px 0; }
+
+/* Invites */
+.invite-note { text-align: left; margin-bottom: 14px; }
+.inv-new { padding: 12px 14px; }
+.inv-new input#invNote { width: 100%; }
+.inv-teams { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 12px; }
+.inv-team { font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.inv-row { display: flex; gap: 10px; align-items: center; }
+.inv-row.off { opacity: .6; }
+.inv-main { flex: 1; min-width: 0; }
+.inv-btns { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+
+/* Admin stats */
+.bars { padding: 10px 14px; }
+.bar-row { display: grid; grid-template-columns: minmax(90px, 40%) 1fr 34px; gap: 8px; align-items: center; font-size: 13px; padding: 3px 0; }
+.bar-row .bl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .bt { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; }
+.bar-row .bt span { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.bar-row .bn { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.spark-card { padding: 10px 14px; margin-top: 8px; }
+.spark { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin-top: 8px; }
+.spark span { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-width: 4px; }
+.spark-lab { display: flex; justify-content: space-between; margin-top: 4px; }
+.seg.wide button { min-width: 0; padding-left: 4px; padding-right: 4px; }
