@@ -1773,7 +1773,7 @@
       const summary = [info.rec && `Record ${info.rec}`, info.standing].filter(Boolean).join(" · ");
       const rows = upcoming.slice(0, n).map(g => {
         const tk = ticketLink(g, true, { ...s, ticket_links: s.ticket_links === "none" ? "favorites" : s.ticket_links });
-        const cal = calendarLink(g, true, { ...s, calendar_links: s.calendar_links === "none" ? "favorites" : s.calendar_links });
+        const cal = calendarLink(g, true, s);   // "Off" in Settings → Email hides these too (calendar sync covers it)
         const time = g.state === "in" ? `<span class="live">● Live</span>` : g.tbd ? "Time TBD" : esc(timeIn(g.start, s.timezone));
         return `<div class="row sched-row">
           <div class="sched-main">
