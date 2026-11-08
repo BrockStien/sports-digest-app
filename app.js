@@ -1149,11 +1149,14 @@
       if (!LEAGUE[t.league]) continue;
       jobs.push(getJSON(`${ESPN}/${LEAGUE[t.league].path}/teams/${t.id}/schedule`).then(d => (d.events || []).map(e => parseGame(e, t.league)).filter(keep).forEach(g => out.set(g.key, g))).catch(() => {}));
     }
+    // ESPN no longer accepts a date range ("20261108-20261114" gives an error), so ask for each day.
     for (const lg of settings.leagues || []) {
       if (!LEAGUE[lg]) continue;
-      const q = new URLSearchParams({ ...(LEAGUE[lg].params || {}), dates: `${pkDay(now)}-${pkDay(until)}` });
-      jobs.push(getJSON(`${ESPN}/${LEAGUE[lg].path}/scoreboard?${q}`).then(d => (d.events || []).map(e => parseGame(e, lg)).filter(keep)
-        .filter(g => !(lg === "cfb" || lg === "cbb") || g.home.rank || g.away.rank).forEach(g => out.set(g.key, g))).catch(() => {}));
+      for (let i = 0; i <= 7; i++) {
+        const q = new URLSearchParams({ ...(LEAGUE[lg].params || {}), dates: pkDay(now + i * 864e5) });
+        jobs.push(getJSON(`${ESPN}/${LEAGUE[lg].path}/scoreboard?${q}`).then(d => (d.events || []).map(e => parseGame(e, lg)).filter(keep)
+          .filter(g => !(lg === "cfb" || lg === "cbb") || g.home.rank || g.away.rank).forEach(g => out.set(g.key, g))).catch(() => {}));
+      }
     }
     await Promise.all(jobs);
     return [...out.values()].sort((a, b) => a.start - b.start);
