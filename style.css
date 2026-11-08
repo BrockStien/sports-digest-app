@@ -433,14 +433,17 @@ tr.tap td.tm::after { content: " ›"; }
 .pk-meta { margin-bottom: 8px; }
 .pk-sides { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: stretch; }
 .pk-at { align-self: center; color: var(--muted); font-size: 13px; }
-.pk-side { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px; min-height: 52px; border-radius: 10px; border: 1.5px solid var(--rule);
-  background: var(--card); color: var(--ink); font: inherit; font-size: 15px; cursor: pointer; text-align: left; }
-.pk-side img { width: 26px; height: 26px; object-fit: contain; flex: none; }
-.pk-side span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pk-side.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); font-weight: 600; }
+.pk-side { position: relative; display: flex; align-items: stretch; min-height: 52px; border-radius: 10px; border: 1.5px solid var(--rule); background: var(--card); }
+.pk-logo { flex: none; width: 46px; display: grid; place-items: center; background: none; border: 0; border-right: 1px solid var(--rule); border-radius: 9px 0 0 9px; cursor: pointer; padding: 0; color: var(--muted); font: inherit; font-size: 11px; font-weight: 700; }
+.pk-logo img { width: 28px; height: 28px; object-fit: contain; }
+.pk-logo:active { background: var(--chip); }
+.pk-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: none; border: 0; color: var(--ink); font: inherit; font-size: 15px; cursor: pointer; text-align: left; border-radius: 0 9px 9px 0; }
+.pk-pick span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pk-side.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.pk-side.picked .pk-pick { font-weight: 600; }
 .pk-side.won b { color: #1f9d55; }
-.pk-side:disabled { cursor: default; opacity: .85; }
-.pk-check { position: absolute; top: -8px; right: -6px; background: var(--accent); color: #fff; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; display: grid; place-items: center; flex: none !important; }
+.pk-pick:disabled { cursor: default; color: var(--ink); opacity: .85; }
+.pk-check { position: absolute; top: -8px; right: -6px; background: var(--accent); color: #fff; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; display: grid; place-items: center; }
 .pk-others { margin-top: 8px; }
 .pk-res .pk-who { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .pk-chip { font-size: 13px; padding: 3px 8px; border-radius: 999px; background: var(--chip); }

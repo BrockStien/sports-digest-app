@@ -1241,8 +1241,12 @@
         const side = t => {
           const picked = my && my.team_id === t.id;
           const won = gm.state === "post" && t.winner;
-          return `<button type="button" class="pk-side ${picked ? "picked" : ""} ${won ? "won" : ""}" ${locked ? "disabled" : ""} data-pick="${esc(k)}" data-team="${esc(t.id)}">
-            ${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ""}<span>${t.rank ? `<span class="small muted">#${t.rank}</span> ` : ""}${esc(t.name)}</span>${gm.state !== "pre" ? `<b>${esc(t.score ?? "")}</b>` : ""}${picked ? `<span class="pk-check">✓</span>` : ""}</button>`;
+          // Logo = team page (record, injuries, roster); the rest of the button = pick.
+          return `<div class="pk-side ${picked ? "picked" : ""} ${won ? "won" : ""} ${locked ? "locked" : ""}">
+            <button type="button" class="pk-logo" data-team="${esc(gm.league)}:${esc(t.id)}" aria-label="${esc(t.name)} team page">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : `<span>${esc((t.abbr || t.name || "?").slice(0, 3))}</span>`}</button>
+            <button type="button" class="pk-pick" ${locked ? "disabled" : ""} data-pick="${esc(k)}" data-team-id="${esc(t.id)}" aria-label="Pick ${esc(t.name)}">
+              <span>${t.rank ? `<span class="small muted">#${t.rank}</span> ` : ""}${esc(t.name)}</span>${gm.state !== "pre" ? `<b>${esc(t.score ?? "")}</b>` : ""}</button>
+            ${picked ? `<span class="pk-check">✓</span>` : ""}</div>`;
         };
         const others = locked ? (all.get(k) || []).filter(p => p.user_id !== me()) : [];
         const when = gm.state === "in" ? `<span class="live">● ${esc(gm.detail)}</span>` : gm.state === "post" ? esc(gm.detail || "Final") : esc(gm.tbd ? "Time TBD" : timeIn(gm.start, s.timezone));
@@ -1250,7 +1254,7 @@
           <div class="pk-meta small muted">${showDay ? `${esc(LEAGUE[gm.league].name)} · ${esc(day(gm.start))} · ` : ""}${when}${gm.tv ? " · " + esc(gm.tv) : ""}${locked ? " · 🔒" : ""}</div>
           <div class="pk-sides">${side(gm.away)}<span class="pk-at">@</span>${side(gm.home)}</div>
           ${others.length ? `<div class="small muted pk-others">${others.map(p => `${esc(nameOfM(p.user_id))}: ${esc(p.team_name)}`).join(" · ")}</div>` : ""}
-          ${!locked && !my ? `<div class="small muted pk-others">Tap a team to pick it</div>` : ""}
+          ${!locked && !my ? `<div class="small muted pk-others">Tap a name to pick · tap a logo for team stats</div>` : ""}
         </section>`;
       };
       const blocks = [];
@@ -1272,7 +1276,7 @@
         </div>${w.failed ? `<div class="empty">Couldn't load this week. Tap ↻ to try again.</div>` : list || `<div class="empty">No games this week.</div>`}`);
       }
       if (pk.games.length) blocks.push(`${Object.keys(pk.weekly || {}).length ? `<div class="pk-week"><div class="pk-week-t"><b>Next 7 days</b><div class="small muted">Your other picked teams and leagues</div></div></div>` : ""}${pk.games.map(gm => card(gm)).join("")}`);
-      box.innerHTML = blocks.length ? blocks.join("") + `<p class="small muted center">Picks lock when each game starts. Everyone's picks show once it begins.</p>${ownerLink}`
+      box.innerHTML = blocks.length ? blocks.join("") + `<p class="small muted center">Tap a team's name to pick it, or its logo for team stats. Picks lock when each game starts, and everyone's picks show once it begins.</p>${ownerLink}`
         : `<div class="empty">No games in the next 7 days.</div>${ownerLink}`;
       box.querySelectorAll("[data-wk]").forEach(b => b.onclick = () => {
         const lg = b.dataset.wk, w = pk.weekly[lg];
@@ -1280,7 +1284,7 @@
         pk.at = 0; box.querySelectorAll("[data-wk]").forEach(x => x.disabled = true);
         loadPickem(g);
       });
-      box.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => makePick(g, b.dataset.pick, b.dataset.team));
+      box.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => makePick(g, b.dataset.pick, b.dataset.teamId));
     }
     const su = document.getElementById("pkSetup"); if (su) su.onclick = () => { pk.setup = true; paintPickem(g); };
   }
