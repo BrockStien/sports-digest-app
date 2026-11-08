@@ -474,3 +474,22 @@ tr.tap td.tm::after { content: " ›"; }
 .tp-roster > summary::-webkit-details-marker { display: none; }
 .tp-roster > summary::before { content: "▸ "; color: var(--muted); }
 .tp-roster[open] > summary::before { content: "▾ "; }
+
+/* My Teams vs Settings (both rendered; one shown) */
+.mode-teams .pg-settings, .mode-settings .pg-teams { display: none; }
+.set-link, .set-group > summary { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.set-link { margin-top: 14px; }
+.set-group { margin-bottom: 10px; }
+.set-group > summary { list-style: none; }
+.set-group > summary::-webkit-details-marker { display: none; }
+.sg-icon { font-size: 22px; width: 28px; text-align: center; flex: none; }
+.sg-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sg-t .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-link .chev, .set-group .chev { color: var(--muted); font-size: 20px; transition: transform .15s; }
+.set-group[open] > summary .chev { transform: rotate(90deg); }
+.set-group[open] > summary { border-bottom: 1px solid var(--rule); }
+.sg-body { padding: 12px 14px 14px; }
+.sg-body > .card { box-shadow: none; }
+.sg-body .howto { margin: 0 0 10px; }
+.alert-presets { margin: 12px 0 4px; }
+.custom-alerts > summary { cursor: pointer; color: var(--accent); font-size: 14px; margin: 6px 0 10px; }

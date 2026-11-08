@@ -617,7 +617,7 @@
   const addFavsBox = (msg = "You haven't picked any favorite teams yet.") =>
     `<div class="addfavs"><span>${msg}</span><button type="button" class="btn primary" data-addfavs>★ Add favorite teams</button></div>`;
   function goAddFavs() {
-    state.tab = "teams"; store.set("tab", "teams"); renderApp();
+    state.teamsView = "teams"; state.tab = "teams"; store.set("tab", "teams"); renderApp();
     const box = document.getElementById("teamSearch");
     if (box) { box.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => box.focus({ preventScroll: true }), 350); }
   }
@@ -638,6 +638,7 @@
     if (first) $app.className = "no-tabs";
     $app.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
       if (b.dataset.tab === "chat" && state.tab === "chat") state.chat.groupId = null;   // tap Chat again: back to the list
+      if (b.dataset.tab === "teams") state.teamsView = "teams";
       state.tab = b.dataset.tab; store.set("tab", state.tab); renderApp();
       window.scrollTo(0, 0);
     });
@@ -2462,13 +2463,23 @@
     const d = state.draft;
     const first = !state.sub;
     const view = document.getElementById("view");
+    // My Teams = name, leagues, favorites. Settings = everything else, in groups that fold open.
+    // (Both are rendered; CSS shows one, so all the wiring below finds its elements.)
+    const mode = first ? "teams" : (state.teamsView || "teams");
+    const noH2 = html => html.replace(/<h2>[^<]*<\/h2>/, "");
+    const groups = store.get("setGroups") || {};
+    const grp = (k, icon, title, sub, body) => `<details class="card set-group" data-grp="${k}" ${groups[k] ? "open" : ""}>
+        <summary><span class="sg-icon">${icon}</span><span class="sg-t"><b>${title}</b><span class="small muted">${sub}</span></span><span class="chev">›</span></summary>
+        <div class="sg-body">${body}</div></details>`;
     view.innerHTML = `
+      <div class="mode-${mode}">
       <header class="top"><div>
-        <div class="kicker">${first ? "Welcome" : "Settings"}</div>
-        <h1>${first ? "Pick your teams" : "My Teams"}</h1>
-      </div></header>
-      ${first ? `<p class="muted">Choose what you follow. Your first email arrives tomorrow morning, and you can change anything later.</p>` : ""}
+        ${mode === "settings" ? `<button class="btn link back" type="button" id="toTeams">‹ My Teams</button><h1>Settings</h1>`
+          : `<div class="kicker">${first ? "Welcome" : "Your teams"}</div><h1>${first ? "Pick your teams" : "My Teams"}</h1>`}
+      </div>${mode === "teams" && !first ? `<button class="icon-btn" type="button" id="toSettings" aria-label="Settings">⚙︎</button>` : ""}</header>
+      ${first ? `<p class="muted">Pick the leagues and teams you follow, then tap the button at the bottom. That's it: email, alerts and the rest start with good defaults, and you can change them any time in Settings.</p>` : ""}
 
+      <div class="pg-teams">
       <div class="field">
         <label for="name">Your first name <span class="muted" style="font-weight:400">(for "Good morning, ___")</span></label>
         <input id="name" type="text" maxlength="60" autocomplete="given-name" value="${esc(d.name)}">
@@ -2499,10 +2510,14 @@
           <input id="fighter" type="text" maxlength="60" placeholder="${esc(peoplePlaceholder(d))}" autocomplete="off">
           <button type="button" class="btn" id="addFighter">Add</button>
         </div>
-        <p class="hint" id="teamHint">Search, or pick a league (and its conference or division), then a team. For golf, racing and UFC you pick people. Favorites are starred, listed first, and get ticket links and calendar invites.</p>
+        <p class="hint" id="teamHint">Search, or pick a league (and its conference or division), then a team. For golf, racing and UFC you pick people. Favorites are starred and listed first.</p>
+      </div>
+      ${first ? "" : `<button type="button" class="card set-link" id="openSettings"><span class="sg-icon">⚙︎</span><span class="sg-t"><b>Settings</b><span class="small muted">Email, alerts, calendar, phone & widget, appearance, account</span></span><span class="chev">›</span></button>`}
       </div>
 
-      <h2>Email</h2>
+      <div class="pg-settings">
+        <div id="adminSlot">${first ? "" : adminLink()}</div>
+        ${grp("email", "📧", "Email", "How often, style, time zone, headlines", `
       <div class="card">
         <div class="switch-row"><div class="txt"><div>Send me email</div><span class="small muted">Arrives around 6:45 AM Arizona time. Turn off to just use the app.</span></div>
           <label class="switch"><input type="checkbox" id="active" ${d.active ? "checked" : ""} aria-label="Send me email"><span></span></label></div>
@@ -2526,29 +2541,35 @@
           <label class="switch"><input type="checkbox" id="favorites_only_headlines" ${d.favorites_only_headlines ? "checked" : ""} aria-label="Only news about my teams"><span></span></label></div>
       </div>
 
-      ${PUSH_ON ? notifySection(d) : ""}
+`)}
+        ${PUSH_ON ? grp("alerts", "🔔", "Alerts", "Turn on for this phone, choose which alerts", notifySection(d)) : ""}
+        ${first ? "" : grp("calendar", "📅", "Calendar sync", "Your games in your phone's calendar", noH2(calendarSync()))}
+        ${grp("phone", "📱", "Phone & widget", "Home Screen app and widget setup", noH2(phoneSetup()))}
+        ${grp("look", "🎨", "Appearance", "Light, dark or match your phone", `
+          <div class="theme-pick" role="group" aria-label="Appearance">
+            ${[["system", "System", "linear-gradient(135deg,#fff 50%,#1b1b1f 50%)"], ["light", "Light", "#fff"], ["dark", "Dark", "#1b1b1f"]].map(([k, label, bg]) =>
+              `<button type="button" data-theme-pick="${k}" aria-pressed="${(d.theme || "system") === k}"><span class="sw" style="background:${bg}"></span>${label}</button>`).join("")}
+          </div>
+          <p class="hint">System matches your phone's light or dark setting. Saves right away.</p>`)}
+        ${grp("account", "👤", "Account", esc(state.user.email), `
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn" id="setpw">Set or change password</button>
+            <button class="btn" id="signout">Sign out</button>
+            ${first ? "" : `<button class="btn danger" id="remove">Delete my settings</button>`}
+          </div>`)}
+      </div>
 
       <div class="savebar"><button class="btn primary block" id="save">${first ? "Start my daily email" : "Save changes"}</button></div>
-
-      <h2>Appearance</h2>
-      <div class="theme-pick" role="group" aria-label="Appearance">
-        ${[["system", "System", "linear-gradient(135deg,#fff 50%,#1b1b1f 50%)"], ["light", "Light", "#fff"], ["dark", "Dark", "#1b1b1f"]].map(([k, label, bg]) =>
-          `<button type="button" data-theme-pick="${k}" aria-pressed="${(d.theme || "system") === k}"><span class="sw" style="background:${bg}"></span>${label}</button>`).join("")}
-      </div>
-      <p class="hint">System matches your phone's light or dark setting.</p>
-
-      ${phoneSetup()}
-
-      ${first ? "" : calendarSync()}
-
-      <h2>Account</h2>
-      <div id="adminSlot">${first ? "" : adminLink()}</div>
-      <p class="small muted">Signed in as ${esc(state.user.email)}</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn" id="setpw">Set or change password</button>
-        <button class="btn" id="signout">Sign out</button>
-        ${first ? "" : `<button class="btn danger" id="remove">Delete my settings</button>`}
+      ${first ? `<p class="small muted center">Signed in as ${esc(state.user.email)} · <button type="button" class="btn link small" id="firstSignout">Sign out</button></p>` : ""}
       </div>`;
+    const toS = () => { state.teamsView = "settings"; renderTeams(); window.scrollTo(0, 0); };
+    const toT = () => { state.teamsView = "teams"; renderTeams(); window.scrollTo(0, 0); };
+    ["toSettings", "openSettings"].forEach(id => { const b = view.querySelector("#" + id); if (b) b.onclick = toS; });
+    const tt = view.querySelector("#toTeams"); if (tt) tt.onclick = toT;
+    const fso = view.querySelector("#firstSignout"); if (fso) fso.onclick = () => view.querySelector("#signout").click();
+    view.querySelectorAll("details[data-grp]").forEach(dt => dt.addEventListener("toggle", () => {
+      const m = { ...(store.get("setGroups") || {}) }; m[dt.dataset.grp] = dt.open; store.set("setGroups", m);
+    }));
 
     // leagues
     view.querySelectorAll("[data-league]").forEach(cb => cb.onchange = () => {
@@ -2769,9 +2790,14 @@
       <label class="switch"><input type="checkbox" id="${id}" ${d[id] ? "checked" : ""} aria-label="${title}"><span></span></label></div>`;
     const minutes = [10, 15, 30, 60, 120].map(m => `<option value="${m}" ${+d.notify_start_minutes === m ? "selected" : ""}>${m < 60 ? m + " min" : m / 60 + " hr"} before</option>`).join("");
     const hours = [5, 6, 7, 8, 9, 10].map(h => `<option value="${h}" ${+d.notify_digest_hour === h ? "selected" : ""}>${h}:00 AM</option>`).join("");
+    const preset = alertPreset(d);
     return `
-      <h2>Notifications</h2>
       <div class="card" style="padding:14px" id="phoneBox"><div class="small muted">Checking this phone…</div></div>
+      <div class="seg wide alert-presets" role="group" aria-label="Which alerts">
+        ${[["essentials", "Essentials"], ["everything", "Everything"], ["custom", "Custom"]].map(([k, l]) => `<button type="button" data-preset="${k}" aria-pressed="${preset === k}">${l}</button>`).join("")}
+      </div>
+      <p class="hint" id="presetHint">${PRESET_HINT[preset]}</p>
+      <details class="custom-alerts" id="customAlerts" ${preset === "custom" ? "open" : ""}><summary>Choose individual alerts</summary>
       <div class="card">
         ${sw("notify_start", "Game starting soon")}
         <div class="switch-row"><div class="txt"><div>How early</div></div>
@@ -2803,7 +2829,22 @@
       <div class="card">
         ${sw("notify_events", "⛳🏁🥊 Your golfers, drivers and fighters", "Takes the lead, pole position, race start and results, your fighter's bout and result")}
       </div>
-      <p class="hint">These go to every phone you've turned notifications on for. Remember to tap Save.</p>`;
+      </details>
+      <p class="hint">Alerts go to every phone you've turned notifications on for. Remember to tap Save.</p>`;
+  }
+  // Alert presets: Essentials (start, finals, close games, morning summary) / Everything / Custom.
+  const ALERT_KEYS = ["notify_start", "notify_scores", "notify_big_plays", "notify_final", "notify_digest", "notify_highlights", "notify_milestones",
+    "notify_drama", "notify_periods", "notify_news", "notify_schedule", "notify_standings", "notify_tickets", "notify_events"];
+  const ESSENTIALS = new Set(["notify_start", "notify_big_plays", "notify_final", "notify_digest"]);
+  const PRESET_HINT = {
+    essentials: "Game starting soon, close finishes and big plays, final scores, and a morning summary.",
+    everything: "Every alert: scores, highlights, milestones, news, schedule changes, standings, ticket drops and more.",
+    custom: "Your own mix. Pick below.",
+  };
+  function alertPreset(d) {
+    if (ALERT_KEYS.every(k => !!d[k] === ESSENTIALS.has(k))) return "essentials";
+    if (ALERT_KEYS.every(k => !!d[k])) return "everything";
+    return "custom";
   }
 
   function wireNotify(view, d) {
@@ -2812,6 +2853,19 @@
      "notify_schedule", "notify_standings", "notify_tickets", "notify_events"].forEach(id =>
       view.querySelector("#" + id).onchange = e => d[id] = e.target.checked);
     ["notify_start_minutes", "notify_digest_hour", "notify_ticket_price"].forEach(id => view.querySelector("#" + id).onchange = e => d[id] = +e.target.value);
+    const showPreset = () => {
+      const p = alertPreset(d);
+      view.querySelectorAll("[data-preset]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.preset === p)));
+      view.querySelector("#presetHint").textContent = PRESET_HINT[p];
+    };
+    view.querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
+      const p = b.dataset.preset;
+      if (p !== "custom") for (const k of ALERT_KEYS) { d[k] = p === "everything" || ESSENTIALS.has(k); const cb = view.querySelector("#" + k); if (cb) cb.checked = d[k]; }
+      view.querySelector("#customAlerts").open = p === "custom";
+      showPreset();
+      if (p === "custom") view.querySelectorAll("[data-preset]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.preset === "custom")));
+    });
+    ALERT_KEYS.forEach(k => view.querySelector("#" + k).addEventListener("change", showPreset));
     paintPhone();
   }
 
