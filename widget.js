@@ -39,6 +39,7 @@ const PATHS = {
 const LEAGUE_NAMES = { nfl: "NFL", nba: "NBA", nhl: "NHL", mlb: "MLB", wnba: "WNBA", cfb: "CFB", cbb: "CBB" };
 
 const RED = new Color("#c8102e");
+const ACCENT = Color.dynamic(new Color("#1f5fbf"), new Color("#6aa2ff"));   // brand blue
 const BG = Color.dynamic(new Color("#ffffff"), new Color("#1b1b1f"));
 const INK = Color.dynamic(new Color("#18181b"), new Color("#f4f4f5"));
 const MUTED = Color.dynamic(new Color("#71717a"), new Color("#a1a1aa"));
@@ -378,7 +379,7 @@ function header(w, data, size = 11) {
   const h = w.addStack();
   h.layoutHorizontally(); h.centerAlignContent();
   const t = h.addText("SPORTS DIGEST");
-  t.font = Font.boldSystemFont(size); t.textColor = RED;
+  t.font = Font.boldSystemFont(size); t.textColor = ACCENT;
   h.addSpacer();
   const u = h.addText(ACCOUNT.state === "expired" ? "Tap to sign in" : data.offline ? "Offline" : fmtDate(new Date(data.at), "h:mm a"));
   u.font = Font.systemFont(size - 1); u.textColor = ACCOUNT.state === "expired" ? RED : MUTED;

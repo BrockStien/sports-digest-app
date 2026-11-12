@@ -4,7 +4,8 @@
   --ink: #18181b;
   --muted: #71717a;
   --rule: #e4e4e7;
-  --accent: #c8102e;
+  --accent: #1f5fbf;
+  --danger: #c8102e;
   --accent-ink: #ffffff;
   --fav: #fff7e6;
   --ticket: #1d6b3a;
@@ -23,7 +24,8 @@
     --ink: #f4f4f5;
     --muted: #a1a1aa;
     --rule: #2e2e33;
-    --accent: #ef3b56;
+    --accent: #6aa2ff;
+    --danger: #ff5c73;
     --fav: #2a2214;
     --ticket: #4ade80;
     --live: #ff5c73;
@@ -38,7 +40,8 @@
     --ink: #f4f4f5;
     --muted: #a1a1aa;
     --rule: #2e2e33;
-    --accent: #ef3b56;
+    --accent: #6aa2ff;
+    --danger: #ff5c73;
     --fav: #2a2214;
     --ticket: #4ade80;
     --live: #ff5c73;
@@ -139,9 +142,9 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.block { width: 100%; }
 .btn.link { border: 0; background: none; color: var(--accent); height: auto; padding: 8px 0; }
-.btn.danger { color: var(--accent); }
+.btn.danger { color: var(--danger); }
 .btn[disabled] { opacity: .6; cursor: progress; }
-.error { color: var(--accent); font-size: 14px; margin: 8px 0 0; }
+.error { color: var(--danger); font-size: 14px; margin: 8px 0 0; }
 
 .leagues { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .check { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--card); cursor: pointer; font-size: 15px; }
@@ -304,7 +307,7 @@ input.code { letter-spacing: .4em; text-align: center; font-size: 22px; font-var
 .admin-link svg, .adm-banner svg { width: 20px; height: 20px; }
 .adm-banner { border-radius: var(--radius); padding: 12px 14px; margin: 14px 0; display: flex; flex-direction: column; gap: 2px; border: 1px solid; }
 .adm-banner.good { background: color-mix(in srgb, var(--ticket) 10%, var(--card)); border-color: color-mix(in srgb, var(--ticket) 35%, var(--rule)); }
-.adm-banner.bad { background: color-mix(in srgb, var(--accent) 10%, var(--card)); border-color: color-mix(in srgb, var(--accent) 40%, var(--rule)); }
+.adm-banner.bad { background: color-mix(in srgb, var(--danger) 10%, var(--card)); border-color: color-mix(in srgb, var(--danger) 40%, var(--rule)); }
 .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-top: 5px; background: var(--muted); }
 .dot.ok { background: #1f9d55; }
 .dot.error { background: #d92d20; }
